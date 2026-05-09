@@ -1,0 +1,24 @@
+[Unit]
+Description=nanobot minimal service (Vertex + Lark)
+After=network.target
+
+[Service]
+Type=simple
+User=nanobot
+Group=nanobot
+WorkingDirectory=/opt/nanobot
+# Load environment variables
+EnvironmentFile=/etc/nanobot/nanobot.env
+# Run minimal entrypoint (virtualenv python)
+ExecStart=/opt/nanobot/venv/bin/python -m nanobot.run_minimal
+Restart=on-failure
+RestartSec=5
+# Limits
+LimitNOFILE=4096
+# Lightweight protections; adjust if needed
+ProtectSystem=full
+ProtectHome=yes
+ReadWritePaths=/var/lib/nanobot /etc/nanobot
+
+[Install]
+WantedBy=multi-user.target
