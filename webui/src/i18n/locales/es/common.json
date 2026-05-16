@@ -104,7 +104,28 @@
       "hideApiKey": "Ocultar API key",
       "noConfiguredProviders": "No hay proveedores configurados",
       "configureFirst": "Configura primero un proveedor en BYOK.",
-      "openByok": "Abrir BYOK"
+      "openByok": "Abrir BYOK",
+      "tabs": {
+        "ariaLabel": "Tipo de credencial BYOK",
+        "llm": "LLM",
+        "webSearch": "Web Search"
+      },
+      "webSearch": {
+        "provider": "Proveedor de búsqueda",
+        "providerHelp": "Elige el backend que usará la herramienta web search.",
+        "selectProvider": "Seleccionar proveedor",
+        "credentials": "Credenciales",
+        "noCredentialRequired": "No requiere key",
+        "noCredentialHelp": "DuckDuckGo funciona sin guardar una API key.",
+        "apiKeyHelp": "Se guarda en config y se muestra enmascarada después de guardar.",
+        "baseUrl": "Base URL",
+        "baseUrlHelp": "SearXNG necesita la URL de tu propia instancia.",
+        "baseUrlPlaceholder": "https://search.example.com",
+        "apiKeyRequired": "Este proveedor de búsqueda requiere una API key.",
+        "baseUrlRequired": "SearXNG requiere una Base URL.",
+        "missingCredential": "Añade la credencial requerida antes de guardar.",
+        "saveHint": "Los cambios se aplican a nuevas solicitudes de web search."
+      }
     }
   },
   "chat": {
@@ -197,6 +218,11 @@
       "placeholderStreaming": "El modelo está respondiendo…",
       "inputAria": "Entrada de mensaje",
       "sendHint": "Enter para enviar · Shift+Enter para nueva línea",
+      "runRuntimeTitle": "En ejecución · {{elapsed}}",
+      "goalStateStrip": "Objetivo · {{label}}",
+      "goalStateFallback": "Objetivo",
+      "goalStateExpandAria": "Ver objetivo completo",
+      "goalStateSheetTitle": "Objetivo",
       "send": "Enviar mensaje",
       "stop": "Detener respuesta",
       "attachImage": "Adjuntar imagen",
@@ -265,12 +291,17 @@
             "title": "Restaurar memoria",
             "description": "Revierte la memoria a una instantánea Dream anterior."
           },
+          "goal": {
+            "title": "Objetivo a largo plazo",
+            "description": "Indica al agente que trate esto como un objetivo sostenido en varios pasos."
+          },
           "help": {
             "title": "Mostrar ayuda",
             "description": "Lista los comandos slash disponibles."
           }
         }
-      }
+      },
+      "goalStateCloseAria": "Cerrar objetivo"
     },
     "scrollToBottom": "Desplazarse al final"
   },
@@ -279,7 +310,19 @@
     "assistantTyping": "El asistente está escribiendo",
     "toolSingle": "Usando una herramienta",
     "toolMany": "Se usaron {{count}} herramientas",
-    "imageAttachment": "Imagen adjunta"
+    "toolSummary": "{{count}} herramienta",
+    "toolSummaryMany": "{{count}} herramientas",
+    "reasoningTools": "Razonamiento · {{count}} herramientas",
+    "reasoningToolsSingular": "Razonamiento · 1 herramienta",
+    "reasoning": "Razonamiento",
+    "reasoningStreaming": "Pensando…",
+    "reasoningSummary": "Razonamiento",
+    "agentActivitySummary": "{{reasoning}} pasos · {{tools}} llamadas a herramientas",
+    "agentActivityToolsOnly": "{{tools}} llamadas a herramientas",
+    "agentActivityLiveSummary": "En curso… · {{reasoning}} pasos · {{tools}} llamadas a herramientas",
+    "agentActivityLiveToolsOnly": "En curso… · {{tools}} llamadas a herramientas",
+    "imageAttachment": "Imagen adjunta",
+    "turnLatencyTitle": "Tiempo de respuesta (extremo a extremo)"
   },
   "lightbox": {
     "title": "Vista previa de imagen",

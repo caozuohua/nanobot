@@ -104,7 +104,28 @@
       "hideApiKey": "Sembunyikan API key",
       "noConfiguredProviders": "Belum ada provider terkonfigurasi",
       "configureFirst": "Konfigurasikan provider di BYOK terlebih dahulu.",
-      "openByok": "Buka BYOK"
+      "openByok": "Buka BYOK",
+      "tabs": {
+        "ariaLabel": "Jenis kredensial BYOK",
+        "llm": "LLM",
+        "webSearch": "Web Search"
+      },
+      "webSearch": {
+        "provider": "Search provider",
+        "providerHelp": "Pilih backend yang digunakan alat web search.",
+        "selectProvider": "Pilih provider",
+        "credentials": "Kredensial",
+        "noCredentialRequired": "Tidak perlu key",
+        "noCredentialHelp": "DuckDuckGo berfungsi tanpa menyimpan API key.",
+        "apiKeyHelp": "Disimpan di config dan ditampilkan tersamarkan setelah disimpan.",
+        "baseUrl": "Base URL",
+        "baseUrlHelp": "SearXNG memerlukan URL instance Anda sendiri.",
+        "baseUrlPlaceholder": "https://search.example.com",
+        "apiKeyRequired": "Provider pencarian ini memerlukan API key.",
+        "baseUrlRequired": "SearXNG memerlukan Base URL.",
+        "missingCredential": "Tambahkan kredensial yang diperlukan sebelum menyimpan.",
+        "saveHint": "Perubahan berlaku untuk permintaan web search baru."
+      }
     }
   },
   "chat": {
@@ -197,6 +218,11 @@
       "placeholderStreaming": "Model sedang merespons…",
       "inputAria": "Input pesan",
       "sendHint": "Enter untuk kirim · Shift+Enter untuk baris baru",
+      "runRuntimeTitle": "Berjalan · {{elapsed}}",
+      "goalStateStrip": "Tujuan · {{label}}",
+      "goalStateFallback": "Tujuan",
+      "goalStateExpandAria": "Lihat tujuan lengkap",
+      "goalStateSheetTitle": "Tujuan",
       "send": "Kirim pesan",
       "stop": "Hentikan respons",
       "attachImage": "Lampirkan gambar",
@@ -265,12 +291,17 @@
             "title": "Pulihkan memori",
             "description": "Kembalikan memori ke snapshot Dream sebelumnya."
           },
+          "goal": {
+            "title": "Tujuan jangka panjang",
+            "description": "Instruksikan agen memperlakukan ini sebagai tujuan multi-langkah yang berkelanjutan."
+          },
           "help": {
             "title": "Tampilkan bantuan",
             "description": "Daftar perintah slash yang tersedia."
           }
         }
-      }
+      },
+      "goalStateCloseAria": "Tutup tujuan"
     },
     "scrollToBottom": "Gulir ke bawah"
   },
@@ -279,7 +310,19 @@
     "assistantTyping": "Asisten sedang mengetik",
     "toolSingle": "Menggunakan sebuah alat",
     "toolMany": "Menggunakan {{count}} alat",
-    "imageAttachment": "Lampiran gambar"
+    "toolSummary": "{{count}} alat",
+    "toolSummaryMany": "{{count}} alat",
+    "reasoningTools": "Penalaran · {{count}} alat",
+    "reasoningToolsSingular": "Penalaran · 1 alat",
+    "reasoning": "Penalaran",
+    "reasoningStreaming": "Berpikir…",
+    "reasoningSummary": "Penalaran",
+    "agentActivitySummary": "{{reasoning}} langkah · {{tools}} panggilan alat",
+    "agentActivityToolsOnly": "{{tools}} panggilan alat",
+    "agentActivityLiveSummary": "Berjalan… · {{reasoning}} langkah · {{tools}} panggilan alat",
+    "agentActivityLiveToolsOnly": "Berjalan… · {{tools}} panggilan alat",
+    "imageAttachment": "Lampiran gambar",
+    "turnLatencyTitle": "Waktu respons (ujung ke ujung)"
   },
   "lightbox": {
     "title": "Pratinjau gambar",
