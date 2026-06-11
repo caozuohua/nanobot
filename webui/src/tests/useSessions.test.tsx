@@ -34,6 +34,7 @@ function fakeClient() {
     },
     sendMessage: vi.fn(),
     newChat: vi.fn(),
+    forkChat: vi.fn(),
     attach: vi.fn(),
     connect: vi.fn(),
     close: vi.fn(),
@@ -155,6 +156,78 @@ describe("useSessions", () => {
 
     await waitFor(() => expect(result.current.sessions[0]?.title).toBe("生成的小标题"));
     expect(api.listSessions).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a newly created chat visible until the server session list catches up", async () => {
+    vi.mocked(api.listSessions)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          key: "websocket:chat-new",
+          channel: "websocket",
+          chatId: "chat-new",
+          createdAt: "2026-05-20T10:00:00Z",
+          updatedAt: "2026-05-20T10:01:00Z",
+          title: "Generated title",
+          preview: "First message",
+        },
+      ]);
+    const client = fakeClient();
+    client.newChat.mockResolvedValue("chat-new");
+
+    const { result } = renderHook(() => useSessions(), {
+      wrapper: wrap(client),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.sessions).toEqual([]);
+
+    await act(async () => {
+      await result.current.createChat();
+    });
+
+    expect(client.newChat).toHaveBeenCalledWith(5000, undefined);
+    expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-new"]);
+
+    await act(async () => {
+      await result.current.refresh();
+    });
+
+    expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-new"]);
+    expect(result.current.sessions[0]?.preview).toBe("");
+
+    await act(async () => {
+      await result.current.refresh();
+    });
+
+    expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-new"]);
+    expect(result.current.sessions[0]?.preview).toBe("First message");
+    expect(result.current.sessions[0]?.title).toBe("Generated title");
+  });
+
+  it("stores optimistic workspace scope when creating a chat", async () => {
+    vi.mocked(api.listSessions).mockResolvedValue([]);
+    const client = fakeClient();
+    client.newChat.mockResolvedValue("chat-workspace");
+    const workspaceScope = {
+      project_path: "/tmp/project",
+      project_name: "project",
+      access_mode: "restricted" as const,
+      restrict_to_workspace: true,
+    };
+
+    const { result } = renderHook(() => useSessions(), {
+      wrapper: wrap(client),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => {
+      await result.current.createChat(workspaceScope);
+    });
+
+    expect(client.newChat).toHaveBeenCalledWith(5000, workspaceScope);
+    expect(result.current.sessions[0]?.workspaceScope).toEqual(workspaceScope);
   });
 
   it("passes through WebUI transcript user media as images and media", async () => {
@@ -339,6 +412,65 @@ describe("useSessions", () => {
 
     expect(result.current.messages).toEqual([]);
     expect(result.current.hasPendingToolCalls).toBe(false);
+  });
+
+  it("loads older transcript pages before the current history", async () => {
+    vi.mocked(api.fetchWebuiThread)
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        messages: [
+          { id: "u2", role: "user", content: "new question", createdAt: 2 },
+          { id: "a2", role: "assistant", content: "new answer", createdAt: 3 },
+        ],
+        page: {
+          before_cursor: "cursor-2",
+          has_more_before: true,
+          loaded_message_count: 2,
+          user_message_offset: 1,
+        },
+      })
+      .mockResolvedValueOnce({
+        schemaVersion: 3,
+        messages: [
+          { id: "u1", role: "user", content: "old question", createdAt: 0 },
+          { id: "a1", role: "assistant", content: "old answer", createdAt: 1 },
+        ],
+        page: {
+          before_cursor: null,
+          has_more_before: false,
+          loaded_message_count: 2,
+          user_message_offset: 0,
+        },
+      });
+
+    const { result } = renderHook(() => useSessionHistory("websocket:paged"), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(api.fetchWebuiThread).toHaveBeenCalledWith("tok", "websocket:paged", {
+      limit: 160,
+      direction: "latest",
+    });
+    expect(result.current.hasMoreBefore).toBe(true);
+    expect(result.current.userMessageOffset).toBe(1);
+
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+
+    expect(api.fetchWebuiThread).toHaveBeenLastCalledWith("tok", "websocket:paged", {
+      limit: 120,
+      before: "cursor-2",
+    });
+    expect(result.current.messages.map((message) => message.content)).toEqual([
+      "old question",
+      "old answer",
+      "new question",
+      "new answer",
+    ]);
+    expect(result.current.hasMoreBefore).toBe(false);
+    expect(result.current.userMessageOffset).toBe(0);
   });
 
   it("keeps the session in the list when delete fails", async () => {
