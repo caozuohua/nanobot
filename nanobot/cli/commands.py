@@ -775,12 +775,13 @@ def _run_gateway(
 
     runtime_profile = profile or FULL_PROFILE
     is_lite = runtime_profile.is_lite
-    if is_lite:
-        os.environ["NANOBOT_PROFILE"] = runtime_profile.name
     model_selection_path = config.workspace_path / ".runtime" / "model-selection.json"
     if is_lite:
         from nanobot.agent.model_selection import load_model_selection, save_model_selection
-        from nanobot.agent.vps_model_catalog import install_vps_model_catalog
+        from nanobot.agent.vps_model_catalog import (
+            install_vps_model_catalog,
+            load_vps_provider_snapshot,
+        )
 
         install_vps_model_catalog(config)
         selected_preset = load_model_selection(model_selection_path)
@@ -821,10 +822,7 @@ def _run_gateway(
         hooks.append(TokenUsageHook(timezone_name=config.agents.defaults.timezone))
         image_generation_configs = image_gen_provider_configs(config)
     else:
-        provider_snapshot_loader = partial(
-            load_provider_snapshot,
-            profile=runtime_profile,
-        )
+        provider_snapshot_loader = load_vps_provider_snapshot
 
     # Create agent with cron service
     agent = AgentLoop.from_config(

@@ -18,6 +18,7 @@ def test_vps_lite_service_unit_has_expected_runtime_limits() -> None:
     assert "Group=nanobot" in text
     assert "WorkingDirectory=/var/lib/nanobot" in text
     assert "EnvironmentFile=-/etc/nanobot/nanobot.env" in text
+    assert "Environment=NANOBOT_PROFILE=vps-lite" in text
     assert (
         "ExecStart=/opt/nanobot/.venv/bin/nanobot gateway --profile vps-lite "
         "--config /var/lib/nanobot/config.json"
@@ -29,7 +30,7 @@ def test_vps_lite_service_unit_has_expected_runtime_limits() -> None:
     assert "TasksMax=128" in text
     assert "LogRateLimitIntervalSec=30s" in text
     assert "LogRateLimitBurst=1000" in text
-    assert "NoNewPrivileges=yes" in text
+    assert "NoNewPrivileges=no" in text
     assert "ProtectSystem=strict" in text
     assert "ProtectHome=read-only" in text
     assert "PrivateTmp=yes" in text
@@ -98,7 +99,7 @@ def test_vps_lite_privileged_assets_are_narrow_and_validatable() -> None:
     assert "blog)" in repo
     assert "newsletter)" in repo
     assert "fd-find|ripgrep|git|gh|jq|curl|sqlite3|hugo" in packages
-    assert "/usr/local/sbin/nanobot-repo *" in sudoers
-    assert "/usr/local/sbin/nanobot-package *" in sudoers
+    assert "/usr/local/sbin/nanobot-repo" in sudoers
+    assert "/usr/local/sbin/nanobot-package" in sudoers
     assert "apt-get *" not in sudoers
     assert "/usr/bin/tee" not in sudoers

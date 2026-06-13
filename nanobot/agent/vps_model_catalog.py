@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from nanobot.config.schema import Config, ModelPresetConfig
 
 MODELS = (
@@ -29,3 +31,16 @@ def install_vps_model_catalog(config: Config) -> None:
                 temperature=0.1,
             )
     config.model_presets = presets
+
+
+def load_vps_provider_snapshot(
+    config_path: Path | None = None,
+    *,
+    preset_name: str | None = None,
+):
+    from nanobot.config.loader import load_config, resolve_config_env_vars
+    from nanobot.providers.factory import build_provider_snapshot
+
+    config = resolve_config_env_vars(load_config(config_path))
+    install_vps_model_catalog(config)
+    return build_provider_snapshot(config, preset_name=preset_name, profile="vps-lite")

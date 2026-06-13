@@ -9,6 +9,7 @@ User=nanobot
 Group=nanobot
 WorkingDirectory=/var/lib/nanobot
 EnvironmentFile=-/etc/nanobot/nanobot.env
+Environment=NANOBOT_PROFILE=vps-lite
 ExecStart=/opt/nanobot/.venv/bin/nanobot gateway --profile vps-lite --config /var/lib/nanobot/config.json
 Restart=on-failure
 RestartSec=5s
@@ -17,7 +18,7 @@ MemoryMax=700M
 TasksMax=128
 LogRateLimitIntervalSec=30s
 LogRateLimitBurst=1000
-NoNewPrivileges=yes
+NoNewPrivileges=no
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectSystem=strict

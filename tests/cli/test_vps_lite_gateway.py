@@ -241,6 +241,10 @@ def test_vps_lite_gateway_omits_webui_and_public_listener_and_threads_profile(
     monkeypatch.setattr(commands, "AgentLoop", _FakeAgent)
     monkeypatch.setattr("nanobot.providers.factory.build_provider_snapshot", _build_snapshot)
     monkeypatch.setattr("nanobot.providers.factory.load_provider_snapshot", _load_snapshot)
+    monkeypatch.setattr(
+        "nanobot.agent.vps_model_catalog.load_vps_provider_snapshot",
+        _load_snapshot,
+    )
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannels)
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
     monkeypatch.setattr("asyncio.start_server", _no_listener)
@@ -254,7 +258,7 @@ def test_vps_lite_gateway_omits_webui_and_public_listener_and_threads_profile(
     assert agent_kwargs["profile"] is VPS_LITE_PROFILE
     assert agent_kwargs["hooks"] == []
     agent_kwargs["provider_snapshot_loader"](Path("config.json"), preset_name="fast")
-    assert seen["loader_call"] == (Path("config.json"), "fast", VPS_LITE_PROFILE)
+    assert seen["loader_call"] == (Path("config.json"), "fast", None)
     channel_kwargs = seen["channel_kwargs"]
     assert isinstance(channel_kwargs, dict)
     assert channel_kwargs == {"runtime_profile": VPS_LITE_PROFILE}
