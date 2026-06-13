@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from nanobot.agent.tools.self import MyToolConfig
     from nanobot.agent.tools.shell import ExecToolConfig
     from nanobot.agent.tools.web import WebToolsConfig
+    from nanobot.runtime_profile import RuntimeProfile
 
 
 class Base(BaseModel):
@@ -412,6 +413,74 @@ class Config(BaseSettings):
         if name not in self.model_presets:
             raise KeyError(f"model_preset {name!r} not found in model_presets")
         return self.model_presets[name]
+
+    def validate_runtime_profile(self, profile: "RuntimeProfile") -> None:
+        """Fail before startup when configured components are unavailable."""
+        from nanobot.providers.registry import find_by_name
+        from nanobot.runtime_profile import RuntimeProfileError
+
+        if profile.channels is not None:
+            extra_channels = self.channels.model_extra or {}
+            unavailable = sorted(
+                name
+                for name, section in extra_channels.items()
+                if (
+                    section.get("enabled", False)
+                    if isinstance(section, dict)
+                    else getattr(section, "enabled", False)
+                )
+                and name not in profile.channels
+            )
+            if unavailable:
+                if len(unavailable) == 1:
+                    detail = f"Channel '{unavailable[0]}' is"
+                else:
+                    names = ", ".join(f"'{name}'" for name in unavailable)
+                    detail = f"Channels {names} are"
+                raise RuntimeProfileError(
+                    f"{detail} not available in runtime profile '{profile.name}'"
+                )
+
+        if profile.providers is not None:
+            presets = [self.resolve_preset()]
+            for fallback in self.agents.defaults.fallback_models:
+                presets.append(
+                    self.model_presets[fallback]
+                    if isinstance(fallback, str)
+                    else ModelPresetConfig(
+                        model=fallback.model,
+                        provider=fallback.provider,
+                        max_tokens=fallback.max_tokens or self.agents.defaults.max_tokens,
+                        context_window_tokens=(
+                            fallback.context_window_tokens
+                            or self.agents.defaults.context_window_tokens
+                        ),
+                        temperature=(
+                            fallback.temperature
+                            if fallback.temperature is not None
+                            else self.agents.defaults.temperature
+                        ),
+                        reasoning_effort=fallback.reasoning_effort,
+                    )
+                )
+            for preset in presets:
+                provider_name = self.get_provider_name(preset.model, preset=preset)
+                capability = provider_name if find_by_name(provider_name) else "custom"
+                if provider_name and capability not in profile.providers:
+                    raise RuntimeProfileError(
+                        f"Provider '{provider_name}' is not available in runtime profile "
+                        f"'{profile.name}'"
+                    )
+
+        profile.validate_tools_config(self.tools)
+        if not profile.allow_stdio_mcp:
+            for name, server in self.tools.mcp_servers.items():
+                transport, source = server.resolve_transport()
+                if transport == "stdio":
+                    raise RuntimeProfileError(
+                        f"MCP server '{name}' uses {source}, which is not available in "
+                        f"runtime profile '{profile.name}'"
+                    )
 
     @property
     def workspace_path(self) -> Path:

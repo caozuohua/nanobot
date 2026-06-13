@@ -367,12 +367,18 @@ class AgentLoop:
         if bus is None:
             bus = MessageBus()
         defaults = config.agents.defaults
-        provider = extra.pop("provider", None) or make_provider(config)
         profile = extra.pop("profile", None)
         if profile is None:
             profile = extra.pop("runtime_profile", None)
         else:
             extra.pop("runtime_profile", None)
+        provider = extra.pop("provider", None)
+        if provider is None:
+            provider = (
+                make_provider(config, profile=profile)
+                if profile is not None
+                else make_provider(config)
+            )
         resolved = config.resolve_preset()
         model = extra.pop("model", None) or resolved.model
         context_window_tokens = extra.pop("context_window_tokens", None) or resolved.context_window_tokens
