@@ -465,8 +465,10 @@ class Config(BaseSettings):
                 )
             for preset in presets:
                 provider_name = self.get_provider_name(preset.model, preset=preset)
+                if not provider_name:
+                    continue
                 capability = provider_name if find_by_name(provider_name) else "custom"
-                if provider_name and capability not in profile.providers:
+                if capability not in profile.providers:
                     raise RuntimeProfileError(
                         f"Provider '{provider_name}' is not available in runtime profile "
                         f"'{profile.name}'"
