@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from nanobot.agent.tools.mcp import _probe_http_url, connect_mcp_servers
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.config.schema import MCPServerConfig
+from nanobot.runtime_profile import VPS_LITE_PROFILE, RuntimeProfileError
 
 # ---------------------------------------------------------------------------
 # _probe_http_url unit tests
@@ -56,6 +59,56 @@ def _make_http_cfg(url: str, transport: str = "streamableHttp"):
     cfg.tool_timeout = 30
     cfg.enabled_tools = ["*"]
     return cfg
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("config", "expected_message"),
+    [
+        (
+            MCPServerConfig(type="stdio", command="local-mcp"),
+            "Runtime profile 'vps-lite' does not allow explicit type=stdio MCP for server 'local'",
+        ),
+        (
+            MCPServerConfig(command="local-mcp"),
+            "Runtime profile 'vps-lite' does not allow command-based stdio MCP for server 'local'",
+        ),
+    ],
+)
+async def test_connect_mcp_servers_rejects_stdio_transports_on_vps_lite(
+    config: MCPServerConfig,
+    expected_message: str,
+):
+    registry = ToolRegistry()
+
+    with pytest.raises(RuntimeProfileError, match=re.escape(expected_message)):
+        await connect_mcp_servers({"local": config}, registry, profile=VPS_LITE_PROFILE)
+
+    assert registry.tool_names == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "config",
+    [
+        _make_http_cfg("http://127.0.0.1:9/sse", transport="sse"),
+        _make_http_cfg("http://127.0.0.1:9/mcp", transport="streamableHttp"),
+    ],
+)
+async def test_connect_mcp_servers_allows_remote_transports_on_vps_lite(
+    config,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def _unreachable(_url: str) -> bool:
+        return False
+
+    registry = ToolRegistry()
+    monkeypatch.setattr("nanobot.agent.tools.mcp._probe_http_url", _unreachable)
+
+    stacks = await connect_mcp_servers({"remote": config}, registry, profile=VPS_LITE_PROFILE)
+
+    assert stacks == {}
+    assert registry.tool_names == []
 
 
 @pytest.mark.asyncio

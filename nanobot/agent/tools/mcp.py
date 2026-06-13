@@ -21,6 +21,7 @@ from nanobot.bus.events import (
     RUNTIME_CONTROL_MCP_RELOAD,
     InboundMessage,
 )
+from nanobot.runtime_profile import FULL_PROFILE, RuntimeProfile, RuntimeProfileError
 from nanobot.security.network import validate_url_target
 
 # Transient connection errors that warrant a single retry.
@@ -103,6 +104,38 @@ async def _validate_mcp_request_url(request: httpx.Request) -> None:
             f"Blocked unsafe MCP URL {request.url} ({error})",
             request=request,
         )
+
+
+def _resolve_mcp_transport(cfg: Any) -> tuple[str | None, str]:
+    """Return the effective transport type and how it was selected."""
+    resolver = getattr(cfg, "resolve_transport", None)
+    if callable(resolver):
+        resolved = resolver()
+        if isinstance(resolved, tuple) and len(resolved) == 2:
+            transport_type, source = resolved
+            return transport_type, str(source)
+
+    transport_type = getattr(cfg, "type", None)
+    if transport_type:
+        return transport_type, "explicit type"
+    if getattr(cfg, "command", ""):
+        return "stdio", "command-based stdio"
+    url = getattr(cfg, "url", "")
+    if url:
+        return ("sse" if str(url).rstrip("/").endswith("/sse") else "streamableHttp"), "url"
+    return None, "unset"
+
+
+def _stdio_profile_error(
+    server_name: str,
+    profile: RuntimeProfile,
+    transport_source: str,
+) -> RuntimeProfileError:
+    transport_label = "explicit type=stdio" if transport_source == "explicit type" else transport_source
+    return RuntimeProfileError(
+        f"Runtime profile {profile.name!r} does not allow {transport_label} MCP "
+        f"for server {server_name!r}. Use sse or streamableHttp, or switch to the full profile."
+    )
 
 
 def _windows_command_basename(command: str) -> str:
@@ -576,7 +609,9 @@ class MCPPromptWrapper(_MCPWrapperBase):
 
 
 async def connect_mcp_servers(
-    mcp_servers: dict, registry: ToolRegistry
+    mcp_servers: dict[str, Any],
+    registry: ToolRegistry,
+    profile: RuntimeProfile | str | None = None,
 ) -> dict[str, AsyncExitStack]:
     """Connect to configured MCP servers and register their tools, resources, prompts.
 
@@ -584,6 +619,13 @@ async def connect_mcp_servers(
     Each server gets its own stack to prevent cancel scope conflicts
     when multiple MCP servers are configured.
     """
+    runtime_profile = RuntimeProfile.coerce(profile) if profile is not None else FULL_PROFILE
+    if not runtime_profile.allow_stdio_mcp:
+        for name, cfg in mcp_servers.items():
+            transport_type, transport_source = _resolve_mcp_transport(cfg)
+            if transport_type == "stdio":
+                raise _stdio_profile_error(name, runtime_profile, transport_source)
+
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.sse import sse_client
     from mcp.client.stdio import stdio_client
@@ -594,7 +636,7 @@ async def connect_mcp_servers(
         await server_stack.__aenter__()
 
         try:
-            transport_type = cfg.type
+            transport_type, transport_source = _resolve_mcp_transport(cfg)
             if not transport_type:
                 if cfg.command:
                     transport_type = "stdio"
@@ -606,6 +648,9 @@ async def connect_mcp_servers(
                     logger.warning("MCP server '{}': no command or url configured, skipping", name)
                     await server_stack.aclose()
                     return name, None
+
+            if transport_type == "stdio" and not runtime_profile.allow_stdio_mcp:
+                raise _stdio_profile_error(name, runtime_profile, transport_source)
 
             if transport_type in {"sse", "streamableHttp"}:
                 ok, error = validate_url_target(cfg.url)
@@ -865,7 +910,11 @@ async def connect_missing_servers(state: Any, registry: ToolRegistry) -> None:
         return
     state._mcp_connecting = True
     try:
-        connected = await connect_mcp_servers(missing_servers, registry)
+        connected = await connect_mcp_servers(
+            missing_servers,
+            registry,
+            profile=getattr(state, "runtime_profile", None),
+        )
         state._mcp_stacks.update(connected)
         _attach_reconnect_handlers(state, registry, connected)
         state._mcp_connected = bool(state._mcp_stacks)
@@ -926,7 +975,11 @@ async def reload_servers(state: Any, registry: ToolRegistry) -> dict[str, Any]:
         to_connect = {name: next_servers[name] for name in to_connect_names}
         connected: dict[str, AsyncExitStack] = {}
         if to_connect:
-            connected = await connect_mcp_servers(to_connect, registry)
+            connected = await connect_mcp_servers(
+                to_connect,
+                registry,
+                profile=getattr(state, "runtime_profile", None),
+            )
             state._mcp_stacks.update(connected)
             _attach_reconnect_handlers(state, registry, connected)
 
@@ -1082,7 +1135,11 @@ async def _refresh_terminated_server(
         _unregister_server_tools(state, registry, server_name)
         await _close_server(state, server_name)
 
-        connected = await connect_mcp_servers({server_name: cfg}, registry)
+        connected = await connect_mcp_servers(
+            {server_name: cfg},
+            registry,
+            profile=getattr(state, "runtime_profile", None),
+        )
         state._mcp_stacks.update(connected)
         _attach_reconnect_handlers(state, registry, connected)
         state._mcp_connected = bool(state._mcp_stacks)

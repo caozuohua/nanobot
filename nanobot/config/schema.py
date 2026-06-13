@@ -308,6 +308,16 @@ class MCPServerConfig(Base):
     tool_timeout: int = 30  # seconds before a tool call is cancelled
     enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
 
+    def resolve_transport(self) -> tuple[str | None, str]:
+        """Return the effective transport type and how it was selected."""
+        if self.type:
+            return self.type, "explicit type"
+        if self.command:
+            return "stdio", "command-based stdio"
+        if self.url:
+            return ("sse" if self.url.rstrip("/").endswith("/sse") else "streamableHttp"), "url"
+        return None, "unset"
+
 
 def _lazy_default(module_path: str, class_name: str) -> Any:
     """Deferred import helper for ToolsConfig default factories."""
