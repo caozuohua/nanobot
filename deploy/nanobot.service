@@ -31,7 +31,6 @@ RestrictRealtime=yes
 MemoryDenyWriteExecute=yes
 LockPersonality=yes
 SystemCallArchitectures=native
-CapabilityBoundingSet=
 AmbientCapabilities=
 ReadWritePaths=/var/lib/nanobot /etc/nanobot /var/www/blog /opt/workspace
 

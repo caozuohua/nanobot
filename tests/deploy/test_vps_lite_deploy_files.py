@@ -40,7 +40,7 @@ def test_vps_lite_service_unit_has_expected_runtime_limits() -> None:
     assert "RestrictSUIDSGID=yes" in text
     assert "LockPersonality=yes" in text
     assert "ReadWritePaths=/var/lib/nanobot /etc/nanobot /var/www/blog /opt/workspace" in text
-    assert "CapabilityBoundingSet=" in text
+    assert "CapabilityBoundingSet=" not in text
     assert "AmbientCapabilities=" in text
     assert "--port" not in text
     assert "--host" not in text
@@ -103,3 +103,10 @@ def test_vps_lite_privileged_assets_are_narrow_and_validatable() -> None:
     assert "/usr/local/sbin/nanobot-package" in sudoers
     assert "apt-get *" not in sudoers
     assert "/usr/bin/tee" not in sudoers
+
+
+def test_vps_lite_service_keeps_capabilities_required_by_sudo_wrapper() -> None:
+    unit = read_deploy_file("nanobot.service")
+
+    assert "NoNewPrivileges=no" in unit
+    assert "CapabilityBoundingSet=" not in unit
