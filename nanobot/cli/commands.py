@@ -775,6 +775,17 @@ def _run_gateway(
 
     runtime_profile = profile or FULL_PROFILE
     is_lite = runtime_profile.is_lite
+    if is_lite:
+        os.environ["NANOBOT_PROFILE"] = runtime_profile.name
+    model_selection_path = config.workspace_path / ".runtime" / "model-selection.json"
+    if is_lite:
+        from nanobot.agent.model_selection import load_model_selection, save_model_selection
+        from nanobot.agent.vps_model_catalog import install_vps_model_catalog
+
+        install_vps_model_catalog(config)
+        selected_preset = load_model_selection(model_selection_path)
+        if selected_preset in config.model_presets:
+            config.agents.defaults.model_preset = selected_preset
     port = port if port is not None else config.gateway.port
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
@@ -829,6 +840,9 @@ def _run_gateway(
         provider_signature=provider_snapshot.signature,
         hooks=hooks,
         profile=runtime_profile,
+        model_selection_persister=(
+            partial(save_model_selection, model_selection_path) if is_lite else None
+        ),
     )
     if not is_lite:
         from nanobot.session.webui_turns import WebuiTurnCoordinator

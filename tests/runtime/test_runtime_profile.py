@@ -36,6 +36,7 @@ def test_vps_lite_profile_has_explicit_runtime_allowlists():
         "web",
         "cron",
         "message",
+        "external_resources",
     })
     assert profile.skills == frozenset({"memory", "cron"})
     assert profile.allow_entrypoint_plugins is False

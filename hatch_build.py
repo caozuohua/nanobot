@@ -50,6 +50,7 @@ _LITE_PROVIDER_ENTRIES = frozenset({
     "openai_responses",
     "registry.py",
     "vertex_ai_provider.py",
+    "google_ai_provider.py",
 })
 _LITE_SKILLS = frozenset({"cron", "memory"})
 

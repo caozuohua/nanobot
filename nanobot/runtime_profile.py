@@ -83,7 +83,10 @@ VPS_LITE_PROFILE = RuntimeProfile(
     name="vps-lite",
     channels=frozenset({"feishu", "telegram", "discord"}),
     providers=frozenset({"vertex_ai", "gemini", "openai", "custom"}),
-    tools=frozenset({"filesystem", "apply_patch", "shell", "web", "cron", "message"}),
+    tools=frozenset({
+        "filesystem", "apply_patch", "shell", "web", "cron", "message",
+        "external_resources",
+    }),
     skills=frozenset({"memory", "cron"}),
     allow_entrypoint_plugins=False,
     allow_stdio_mcp=False,

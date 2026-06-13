@@ -339,8 +339,8 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         keywords=("gemini", "gemma"),
         env_key="GEMINI_API_KEY",
         display_name="Gemini",
-        backend="openai_compat",
-        default_api_base="https://generativelanguage.googleapis.com/v1beta/openai/",
+        backend="google_ai",
+        is_direct=True,
     ),
     # Zhipu (智谱): OpenAI-compatible at open.bigmodel.cn
     ProviderSpec(

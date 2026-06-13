@@ -43,6 +43,7 @@
 | Connect Telegram, Discord, WeChat, Slack, Email, or another chat app | [Chat Apps](./docs/chat-apps.md) |
 | Configure providers, fallback models, Langfuse, MCP, web tools, or security | [Docs](./docs/README.md) and [Configuration](./docs/configuration.md) |
 | Understand or extend the internals | [Architecture](./docs/architecture.md) and [Development](./docs/development.md) |
+| Deploy the reduced VPS build | [VPS Lite deployment](./docs/vps-lite.md) |
 
 ## 📢 News
 

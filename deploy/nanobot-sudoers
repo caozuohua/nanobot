@@ -1,0 +1,2 @@
+Cmnd_Alias NANOBOT_OPS = /usr/local/sbin/nanobot-repo *, /usr/local/sbin/nanobot-package *, /bin/systemctl restart nanobot.service, /bin/systemctl status nanobot.service, /bin/journalctl -u nanobot.service *
+nanobot ALL=(root) NOPASSWD: NANOBOT_OPS

@@ -241,12 +241,17 @@ def _command_error_message(exc: Exception) -> str:
 def _model_command_status(loop) -> str:
     names = _model_preset_names(loop)
     active = _active_model_preset_name(loop)
-    return "\n".join([
+    lines = [
         "## Model",
-        f"- Current model: `{loop.model}`",
-        f"- Current preset: `{active}`",
-        f"- Available presets: {_format_preset_names(names)}",
-    ])
+        f"Current model: `{loop.model}`",
+        f"Current preset: `{active}`",
+        f"Available presets: {_format_preset_names(names)}",
+        "",
+    ]
+    for index, name in enumerate(names, 1):
+        marker = "* " if name == active else ""
+        lines.append(f"{index}. {marker}`{name}`")
+    return "\n".join(lines)
 
 
 async def cmd_model(ctx: CommandContext) -> OutboundMessage:
@@ -273,6 +278,13 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
         )
 
     name = parts[0]
+    names = _model_preset_names(loop)
+    if name.isdigit():
+        index = int(name)
+        if index < 1 or index > len(names):
+            name = ""
+        else:
+            name = names[index - 1]
     try:
         loop.set_model_preset(name)
     except (KeyError, ValueError) as exc:
@@ -286,6 +298,8 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
             ),
             metadata=metadata,
         )
+    if loop.model_selection_persister is not None:
+        loop.model_selection_persister(name)
 
     max_tokens = getattr(getattr(loop.provider, "generation", None), "max_tokens", None)
     lines = [
@@ -679,19 +693,61 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     return OutboundMessage(
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
-        content=build_help_text(),
+        content=build_help_text(ctx.loop.runtime_profile),
         metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
     )
 
 
-def build_help_text() -> str:
+def build_help_text(profile=None) -> str:
     """Build canonical help text shared across channels."""
-    lines = ["🐈 nanobot commands:"]
-    for spec in BUILTIN_COMMAND_SPECS:
-        command = spec.command
-        if spec.arg_hint:
-            command = f"{command} {spec.arg_hint}"
-        lines.append(f"{command} — {spec.description}")
+    from nanobot.runtime_profile import RuntimeProfile
+
+    runtime = RuntimeProfile.coerce(profile)
+    if not runtime.is_lite:
+        lines = ["🐈 nanobot commands:"]
+        for spec in BUILTIN_COMMAND_SPECS:
+            command = spec.command
+            if spec.arg_hint:
+                command = f"{command} {spec.arg_hint}"
+            lines.append(f"{command} — {spec.description}")
+        return "\n".join(lines)
+    lite_hidden = {"/goal", "/dream", "/dream-log", "/dream-restore"}
+    visible = [
+        spec for spec in BUILTIN_COMMAND_SPECS
+        if not runtime.is_lite or spec.command not in lite_hidden
+    ]
+    groups = (
+        ("会话", {"/new", "/stop", "/history"}),
+        ("模型", {"/model"}),
+        ("能力", {"/skill"}),
+        ("维护", {"/status", "/restart", "/pairing", "/help"}),
+    )
+    short = {
+        "/new": "新会话",
+        "/stop": "停止当前任务",
+        "/history": "最近消息",
+        "/model": "查看或切换模型",
+        "/skill": "可用技能",
+        "/status": "运行状态",
+        "/restart": "重启 nanobot",
+        "/pairing": "配对管理",
+        "/help": "显示帮助",
+    }
+    lines = ["🐈 nanobot 指令"]
+    for title, commands in groups:
+        entries = [spec for spec in visible if spec.command in commands]
+        if not entries:
+            continue
+        lines.extend(["", f"【{title}】"])
+        for spec in entries:
+            command = spec.command
+            if spec.command == "/model":
+                command += " [序号|preset]"
+            elif spec.command == "/pairing":
+                command += " [操作]"
+            elif spec.arg_hint:
+                command += f" {spec.arg_hint}"
+            lines.append(f"{command}  {short.get(spec.command, spec.title)}")
     return "\n".join(lines)
 
 

@@ -67,6 +67,17 @@ class VertexAIProvider(LLMProvider):
                 )
         return self._client
 
+    async def _client_for_model(self, model: str) -> Any:
+        requested = self._request_model_name(model)
+        if requested.startswith(("gemini-3.", "gemini-3-")) and self.location != "global":
+            sdk = self._load_sdk()
+            return sdk.Client(
+                vertexai=True,
+                project=self.project,
+                location="global",
+            )
+        return await self._ensure_client()
+
     @staticmethod
     def _request_model_name(model: str) -> str:
         if "/" not in model:
@@ -268,9 +279,10 @@ class VertexAIProvider(LLMProvider):
                 config["tool_config"] = tool_config
 
         try:
-            client = await self._ensure_client()
+            requested_model = model or self.default_model
+            client = await self._client_for_model(requested_model)
             response = await client.aio.models.generate_content(
-                model=self._request_model_name(model or self.default_model),
+                model=self._request_model_name(requested_model),
                 contents=contents,
                 config=config,
             )

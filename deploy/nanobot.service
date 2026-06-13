@@ -32,7 +32,7 @@ LockPersonality=yes
 SystemCallArchitectures=native
 CapabilityBoundingSet=
 AmbientCapabilities=
-ReadWritePaths=/var/lib/nanobot /etc/nanobot
+ReadWritePaths=/var/lib/nanobot /etc/nanobot /var/www/blog /opt/workspace
 
 [Install]
 WantedBy=multi-user.target

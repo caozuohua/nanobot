@@ -149,6 +149,13 @@ def _make_provider_core(
             location=getattr(p, "location", None) if p else None,
             default_model=model,
         )
+    elif backend == "google_ai":
+        from nanobot.providers.google_ai_provider import GoogleAIProvider
+
+        provider = GoogleAIProvider(
+            api_key=p.api_key if p else None,
+            default_model=model,
+        )
     else:
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 

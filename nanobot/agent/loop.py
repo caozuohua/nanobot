@@ -215,6 +215,7 @@ class AgentLoop:
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
         runtime_events: RuntimeEventBus | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
+        model_selection_persister: Callable[[str], None] | None = None,
         profile: RuntimeProfile | str | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
@@ -223,6 +224,7 @@ class AgentLoop:
         defaults = AgentDefaults()
         self.bus = bus
         self.runtime_events = runtime_events or RuntimeEventBus()
+        self.model_selection_persister = model_selection_persister
         self.runtime_event_publisher = RuntimeEventPublisher(self.runtime_events)
         self.channels_config = channels_config
         self.provider = provider

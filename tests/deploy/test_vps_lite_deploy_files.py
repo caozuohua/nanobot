@@ -38,7 +38,7 @@ def test_vps_lite_service_unit_has_expected_runtime_limits() -> None:
     assert "ProtectControlGroups=yes" in text
     assert "RestrictSUIDSGID=yes" in text
     assert "LockPersonality=yes" in text
-    assert "ReadWritePaths=/var/lib/nanobot /etc/nanobot" in text
+    assert "ReadWritePaths=/var/lib/nanobot /etc/nanobot /var/www/blog /opt/workspace" in text
     assert "CapabilityBoundingSet=" in text
     assert "AmbientCapabilities=" in text
     assert "--port" not in text
@@ -85,3 +85,20 @@ def test_vps_lite_install_script_is_safe_and_does_not_cut_over() -> None:
     assert "systemctl disable luck-agent" not in text
     assert "luck-agent" not in text
     assert "cutover" not in text.lower()
+
+
+def test_vps_lite_privileged_assets_are_narrow_and_validatable() -> None:
+    repo = read_deploy_file("nanobot-repo")
+    packages = read_deploy_file("nanobot-package")
+    sudoers = read_deploy_file("nanobot-sudoers")
+
+    assert "reset --hard" not in repo
+    assert "push --force" not in repo
+    assert "pull --ff-only" in repo
+    assert "blog)" in repo
+    assert "newsletter)" in repo
+    assert "fd-find|ripgrep|git|gh|jq|curl|sqlite3|hugo" in packages
+    assert "/usr/local/sbin/nanobot-repo *" in sudoers
+    assert "/usr/local/sbin/nanobot-package *" in sudoers
+    assert "apt-get *" not in sudoers
+    assert "/usr/bin/tee" not in sudoers

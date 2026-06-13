@@ -14,6 +14,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 readonly UNIT_SRC=${SCRIPT_DIR}/nanobot.service
 readonly ENV_SRC=${SCRIPT_DIR}/nanobot.env.example
+readonly REPO_WRAPPER_SRC=${SCRIPT_DIR}/nanobot-repo
+readonly PACKAGE_WRAPPER_SRC=${SCRIPT_DIR}/nanobot-package
+readonly SUDOERS_SRC=${SCRIPT_DIR}/nanobot-sudoers
 readonly UNIT_DST=/etc/systemd/system/${SERVICE_NAME}.service
 readonly ENV_DST=${ETC_DIR}/nanobot.env
 
@@ -78,6 +81,18 @@ install_unit() {
   install -D -m 0644 "${UNIT_SRC}" "${UNIT_DST}"
 }
 
+install_privileged_assets() {
+  install -o root -g root -m 0755 "${REPO_WRAPPER_SRC}" /usr/local/sbin/nanobot-repo
+  install -o root -g root -m 0755 "${PACKAGE_WRAPPER_SRC}" /usr/local/sbin/nanobot-package
+  visudo -cf "${SUDOERS_SRC}"
+  install -o root -g root -m 0440 "${SUDOERS_SRC}" /etc/sudoers.d/nanobot
+  visudo -cf /etc/sudoers.d/nanobot
+  rm -f /etc/sudoers.d/bot
+  if [[ -x /usr/bin/fdfind && ! -e /usr/local/bin/fd ]]; then
+    ln -s /usr/bin/fdfind /usr/local/bin/fd
+  fi
+}
+
 validate_cli() {
   "${VENV_CLI}" gateway --help >/dev/null
 }
@@ -131,6 +146,7 @@ main() {
   chown -R "${SERVICE_NAME}:${SERVICE_NAME}" "${APP_DIR}" "${STATE_DIR}"
   install_env_template
   install_unit
+  install_privileged_assets
   systemctl daemon-reload
   validate_cli
   validate_config_and_profile

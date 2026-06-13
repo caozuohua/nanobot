@@ -96,6 +96,32 @@ async def test_chat_returns_text_and_usage_from_async_sdk() -> None:
 
 
 @pytest.mark.asyncio
+async def test_vertex_3x_models_use_global_location(monkeypatch) -> None:
+    import nanobot.providers.vertex_ai_provider as vertex_module
+
+    response = _response(text="ok")
+    global_client = SimpleNamespace(
+        aio=SimpleNamespace(models=SimpleNamespace(generate_content=AsyncMock(return_value=response)))
+    )
+    factory = MagicMock(return_value=global_client)
+    monkeypatch.setattr(vertex_module, "genai", SimpleNamespace(Client=factory))
+    provider = VertexAIProvider(
+        project="demo-project",
+        location="us-central1",
+        default_model="vertex_ai/gemini-3.1-flash-lite",
+    )
+
+    result = await provider.chat(messages=[{"role": "user", "content": "hello"}])
+
+    assert result.content == "ok"
+    factory.assert_called_once_with(
+        vertexai=True,
+        project="demo-project",
+        location="global",
+    )
+
+
+@pytest.mark.asyncio
 async def test_chat_returns_function_calls() -> None:
     function_call = SimpleNamespace(
         id="call-123",

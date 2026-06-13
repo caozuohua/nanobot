@@ -1544,12 +1544,12 @@ async def test_on_help_includes_restart_command() -> None:
     assert "/restart" in help_text
     assert "/status" in help_text
     assert "/skill" in help_text
-    assert "/dream" in help_text
-    assert "/dream-log" in help_text
-    assert "/goal" in help_text
+    assert "/dream" not in help_text
+    assert "/dream-log" not in help_text
+    assert "/goal" not in help_text
     assert "/pairing" in help_text
     assert "/model" in help_text
-    assert "/dream-restore" in help_text
+    assert "/dream-restore" not in help_text
 
 
 @pytest.mark.asyncio

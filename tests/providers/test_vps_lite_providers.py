@@ -4,6 +4,7 @@ import pytest
 
 from nanobot.config.schema import Config
 from nanobot.providers.factory import make_provider
+from nanobot.providers.google_ai_provider import GoogleAIProvider
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.providers.vertex_ai_provider import VertexAIProvider
 from nanobot.runtime_profile import VPS_LITE_PROFILE, RuntimeProfileError
@@ -49,7 +50,7 @@ def test_vps_lite_provider_allowlist_is_exact() -> None:
             "gemini",
             "gemini/gemini-2.5-flash",
             {"apiKey": "gemini-key"},
-            OpenAICompatProvider,
+            GoogleAIProvider,
         ),
         (
             "openai",

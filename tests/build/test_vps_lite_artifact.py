@@ -68,6 +68,7 @@ SUPPORTED_PROVIDER_MODULES = {
     "factory.py",
     "fallback_provider.py",
     "image_generation.py",
+    "google_ai_provider.py",
     "openai_compat_provider.py",
     "registry.py",
     "vertex_ai_provider.py",

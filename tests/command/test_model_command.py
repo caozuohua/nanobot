@@ -76,6 +76,30 @@ async def test_model_command_lists_current_and_available_presets(tmp_path) -> No
 
 
 @pytest.mark.asyncio
+async def test_model_command_lists_numbered_presets_and_switches_by_number(tmp_path) -> None:
+    loop = _make_loop(tmp_path)
+
+    status = await cmd_model(_ctx(loop, "/model"))
+    switched = await cmd_model(_ctx(loop, "/model 2", args="2"))
+
+    assert "1. * `default`" in status.content
+    assert "2. `fast`" in status.content
+    assert "Switched model preset to `fast`." in switched.content
+    assert loop.model_preset == "fast"
+
+
+@pytest.mark.asyncio
+async def test_model_command_persists_successful_global_selection(tmp_path) -> None:
+    loop = _make_loop(tmp_path)
+    persisted: list[str] = []
+    loop.model_selection_persister = persisted.append
+
+    await cmd_model(_ctx(loop, "/model fast", args="fast"))
+
+    assert persisted == ["fast"]
+
+
+@pytest.mark.asyncio
 async def test_model_command_switches_preset(tmp_path) -> None:
     loop = _make_loop(tmp_path)
 

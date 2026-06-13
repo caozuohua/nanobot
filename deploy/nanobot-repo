@@ -1,0 +1,45 @@
+#!/bin/sh
+set -eu
+
+[ "$#" -ge 2 ] || exit 2
+action=$1
+name=$2
+shift 2
+
+case "$name" in
+  blog) repo=/var/www/blog; expected='github.com/caozuohua/caozuohua.github.io' ;;
+  newsletter) repo=/opt/workspace/ai-daily-newsletter-repo; expected='github.com/caozuohua/ai-daily-newsletter' ;;
+  pkb) repo=/var/lib/nanobot/pkb; expected='github.com/caozuohua/' ;;
+  *) echo "repository not allowed" >&2; exit 2 ;;
+esac
+
+[ -d "$repo/.git" ] || { echo "repository unavailable: $name" >&2; exit 3; }
+remote=$(runuser -u nanobot -- git -C "$repo" config --get remote.origin.url)
+case "$remote" in *"$expected"*) ;; *) echo "unexpected remote" >&2; exit 3 ;; esac
+
+case "$action" in
+  status) exec runuser -u nanobot -- git -C "$repo" status --short --branch ;;
+  pull)
+    runuser -u nanobot -- git -C "$repo" diff --quiet
+    runuser -u nanobot -- git -C "$repo" diff --cached --quiet
+    exec runuser -u nanobot -- git -C "$repo" pull --ff-only
+    ;;
+  commit-push)
+    [ "$#" -eq 1 ] || exit 2
+    message=$1
+    [ -n "$message" ] && [ "${#message}" -le 200 ] || exit 2
+    runuser -u nanobot -- git -C "$repo" add -A
+    runuser -u nanobot -- git -C "$repo" diff --cached --quiet && {
+      echo "nothing to commit"
+      exit 0
+    }
+    runuser -u nanobot -- git -C "$repo" commit -m "$message"
+    exec runuser -u nanobot -- git -C "$repo" push origin HEAD
+    ;;
+  publish)
+    [ "$name" = blog ] || exit 2
+    runuser -u nanobot -- /usr/bin/hugo --source "$repo"
+    exec /usr/sbin/nginx -s reload
+    ;;
+  *) echo "action not allowed" >&2; exit 2 ;;
+esac

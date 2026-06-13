@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+
+[ "$#" -ge 1 ] || exit 2
+for package in "$@"; do
+  case "$package" in
+    fd-find|ripgrep|git|gh|jq|curl|sqlite3|hugo) ;;
+    *) echo "package not allowed: $package" >&2; exit 2 ;;
+  esac
+done
+apt-get update
+exec apt-get install -y -- "$@"
