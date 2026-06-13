@@ -17,6 +17,7 @@ LITE_DEPENDENCIES = {
     "croniter",
     "ddgs",
     "discord-py",
+    "dulwich",
     "filelock",
     "google-genai",
     "httpx",
