@@ -16,16 +16,17 @@ from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.file_state import FileStates
 from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.bus.events import InboundMessage
+from nanobot.bus.queue import MessageBus
+from nanobot.config.schema import AgentDefaults, ToolsConfig
+from nanobot.providers.base import LLMProvider
+from nanobot.runtime_profile import RuntimeProfile
 from nanobot.security.workspace_access import (
     WorkspaceScope,
     bind_workspace_scope,
     reset_workspace_scope,
     workspace_sandbox_status,
 )
-from nanobot.bus.events import InboundMessage
-from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentDefaults, ToolsConfig
-from nanobot.providers.base import LLMProvider
 from nanobot.utils.prompt_templates import render_template
 
 
@@ -87,6 +88,7 @@ class SubagentManager:
         max_iterations: int | None = None,
         max_concurrent_subagents: int | None = None,
         llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
+        profile: RuntimeProfile | str | None = None,
     ):
         defaults = AgentDefaults()
         self.provider = provider
@@ -97,6 +99,7 @@ class SubagentManager:
         self.max_tool_result_chars = max_tool_result_chars
         self.restrict_to_workspace = restrict_to_workspace
         self.disabled_skills = set(disabled_skills or [])
+        self.profile = RuntimeProfile.coerce(profile)
         self.max_iterations = (
             max_iterations
             if max_iterations is not None
@@ -115,11 +118,16 @@ class SubagentManager:
 
     def _subagent_tools_config(self) -> ToolsConfig:
         """Build a ToolsConfig scoped for subagent use."""
-        return ToolsConfig(
+        cfg = ToolsConfig(
             exec=self.tools_config.exec,
             web=self.tools_config.web,
             restrict_to_workspace=self.restrict_to_workspace,
         )
+        if self.profile.is_lite:
+            cfg.my.enable = False
+            cfg.cli_apps.enable = False
+            cfg.image_generation.enabled = False
+        return cfg
 
     def _build_tools(
         self,
@@ -139,7 +147,7 @@ class SubagentManager:
                 workspace=root,
             ),
         )
-        ToolLoader().load(ctx, registry, scope="subagent")
+        ToolLoader(profile=self.profile).load(ctx, registry, scope="subagent")
         return registry
 
     def set_provider(self, provider: LLMProvider, model: str) -> None:
@@ -362,6 +370,7 @@ class SubagentManager:
         skills_summary = SkillsLoader(
             root,
             disabled_skills=self.disabled_skills,
+            profile=self.profile,
         ).build_skills_summary()
         return render_template(
             "agent/subagent_system.md",

@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.context import ContextBuilder
+from nanobot.runtime_profile import RuntimeProfile
 from nanobot.session.goal_state import GOAL_STATE_KEY
 
 # ---------------------------------------------------------------------------
@@ -298,6 +299,46 @@ class TestBuildSystemPrompt:
         result = builder.build_system_prompt()
         assert "## AGENTS.md" not in result
         assert "[Archived Context Summary]" not in result
+
+    def test_lite_profile_keeps_workspace_skill_override(self, tmp_path):
+        ws_skills = tmp_path / "skills"
+        ws_skills.mkdir(parents=True)
+        (ws_skills / "my").mkdir()
+        (ws_skills / "my" / "SKILL.md").write_text(
+            "---\n"
+            "name: my\n"
+            "always: true\n"
+            "---\n\n# Workspace my\n",
+            encoding="utf-8",
+        )
+
+        builtin = tmp_path / "builtin"
+        (builtin / "my").mkdir(parents=True)
+        (builtin / "my" / "SKILL.md").write_text(
+            "---\n"
+            "name: my\n"
+            "always: true\n"
+            "---\n\n# Builtin my\n",
+            encoding="utf-8",
+        )
+        (builtin / "image-generation").mkdir()
+        (builtin / "image-generation" / "SKILL.md").write_text(
+            "---\n"
+            "name: image-generation\n"
+            "always: true\n"
+            "---\n\n# Builtin image generation\n",
+            encoding="utf-8",
+        )
+
+        builder = ContextBuilder(
+            workspace=tmp_path,
+            profile=RuntimeProfile.VPS_LITE,
+        )
+        prompt = builder.build_system_prompt()
+
+        assert "# Workspace my" in prompt
+        assert "# Builtin my" not in prompt
+        assert "# Builtin image generation" not in prompt
 
 
 # ---------------------------------------------------------------------------

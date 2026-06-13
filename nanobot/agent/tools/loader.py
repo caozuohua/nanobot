@@ -10,6 +10,7 @@ from loguru import logger
 
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.runtime_profile import RuntimeProfile
 
 _SKIP_MODULES = frozenset({
     "base", "schema", "registry", "context", "loader", "config",
@@ -18,11 +19,26 @@ _SKIP_MODULES = frozenset({
 
 
 class ToolLoader:
-    def __init__(self, package: Any = None, *, test_classes: list[type[Tool]] | None = None):
+    def __init__(
+        self,
+        package: Any = None,
+        *,
+        profile: RuntimeProfile | str | None = None,
+        module_allowlist: set[str] | None = None,
+        test_classes: list[type[Tool]] | None = None,
+    ):
         if package is None:
             import nanobot.agent.tools as _pkg
             package = _pkg
         self._package = package
+        self.profile = RuntimeProfile.coerce(profile)
+        profile_allowlist = self.profile.tool_module_allowlist
+        if profile_allowlist is None:
+            self._module_allowlist = frozenset(module_allowlist) if module_allowlist is not None else None
+        elif module_allowlist is None:
+            self._module_allowlist = profile_allowlist
+        else:
+            self._module_allowlist = frozenset(module_allowlist) & profile_allowlist
         self._test_classes = test_classes
         self._discovered: list[type[Tool]] | None = None
         self._plugins: dict[str, type[Tool]] | None = None
@@ -36,6 +52,8 @@ class ToolLoader:
         results: list[type[Tool]] = []
         for _importer, module_name, _ispkg in pkgutil.iter_modules(self._package.__path__):
             if module_name.startswith("_") or module_name in _SKIP_MODULES:
+                continue
+            if self._module_allowlist is not None and module_name not in self._module_allowlist:
                 continue
             try:
                 module = importlib.import_module(f".{module_name}", self._package.__name__)
@@ -63,10 +81,14 @@ class ToolLoader:
         """Discover external tool plugins registered via entry_points."""
         if self._plugins is not None:
             return self._plugins
+        if not self.profile.entrypoint_plugins_enabled:
+            self._plugins = {}
+            return self._plugins
         plugins: dict[str, type[Tool]] = {}
         try:
             eps = entry_points(group="nanobot.tools")
         except Exception:
+            self._plugins = plugins
             return plugins
         for ep in eps:
             try:
@@ -84,6 +106,7 @@ class ToolLoader:
         return plugins
 
     def load(self, ctx: Any, registry: ToolRegistry, *, scope: str = "core") -> list[str]:
+        self.profile.validate_tools_config(getattr(ctx, "config", None))
         registered: list[str] = []
         builtin_names: set[str] = set()
         sources = [(self.discover(), False), (self._discover_plugins().values(), True)]

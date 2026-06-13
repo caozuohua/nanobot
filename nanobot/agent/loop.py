@@ -45,6 +45,7 @@ from nanobot.cron.session_turns import (
 )
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
+from nanobot.runtime_profile import RuntimeProfile
 from nanobot.security.workspace_access import (
     WorkspaceScopeResolver,
     bind_workspace_scope,
@@ -214,6 +215,7 @@ class AgentLoop:
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
         runtime_events: RuntimeEventBus | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
+        profile: RuntimeProfile | str | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -268,8 +270,14 @@ class AgentLoop:
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
+        self.runtime_profile = RuntimeProfile.coerce(profile)
 
-        self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
+        self.context = ContextBuilder(
+            workspace,
+            timezone=timezone,
+            disabled_skills=disabled_skills,
+            profile=self.runtime_profile,
+        )
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         # One file-read/write tracker per logical session. The tool registry is
@@ -285,6 +293,7 @@ class AgentLoop:
             max_tool_result_chars=self.max_tool_result_chars,
             restrict_to_workspace=restrict_to_workspace,
             disabled_skills=disabled_skills,
+            profile=self.runtime_profile,
             max_iterations=self.max_iterations,
             max_concurrent_subagents=max_concurrent_subagents,
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
@@ -359,6 +368,11 @@ class AgentLoop:
             bus = MessageBus()
         defaults = config.agents.defaults
         provider = extra.pop("provider", None) or make_provider(config)
+        profile = extra.pop("profile", None)
+        if profile is None:
+            profile = extra.pop("runtime_profile", None)
+        else:
+            extra.pop("runtime_profile", None)
         resolved = config.resolve_preset()
         model = extra.pop("model", None) or resolved.model
         context_window_tokens = extra.pop("context_window_tokens", None) or resolved.context_window_tokens
@@ -393,6 +407,7 @@ class AgentLoop:
             model_preset=defaults.model_preset,
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
+            profile=profile,
             **extra,
         )
 
@@ -496,7 +511,7 @@ class AgentLoop:
             workspace_sandbox=self.workspace_scopes.sandbox_status,
             runtime_events=self.runtime_events,
         )
-        loader = ToolLoader()
+        loader = ToolLoader(profile=self.runtime_profile)
         registered = loader.load(ctx, self.tools)
 
         # MyTool needs runtime state reference — manual registration
