@@ -1,23 +1,37 @@
 [Unit]
-Description=nanobot minimal service (Vertex + Lark)
-After=network.target
+Description=nanobot vps-lite gateway
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=simple
 User=nanobot
 Group=nanobot
-WorkingDirectory=/opt/nanobot
-# Load environment variables
-EnvironmentFile=/etc/nanobot/nanobot.env
-# Run minimal entrypoint (virtualenv python)
-ExecStart=/opt/nanobot/venv/bin/python -m nanobot.run_minimal
+WorkingDirectory=/var/lib/nanobot
+EnvironmentFile=-/etc/nanobot/nanobot.env
+ExecStart=/opt/nanobot/.venv/bin/nanobot gateway --profile vps-lite --config /var/lib/nanobot/config.json
 Restart=on-failure
-RestartSec=5
-# Limits
-LimitNOFILE=4096
-# Lightweight protections; adjust if needed
-ProtectSystem=full
-ProtectHome=yes
+RestartSec=5s
+MemoryHigh=550M
+MemoryMax=700M
+TasksMax=128
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=1000
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectControlGroups=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+MemoryDenyWriteExecute=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
 ReadWritePaths=/var/lib/nanobot /etc/nanobot
 
 [Install]
