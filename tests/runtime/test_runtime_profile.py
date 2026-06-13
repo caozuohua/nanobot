@@ -2,7 +2,13 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
+import nanobot.runtime_profile as runtime_profile
 from nanobot.runtime_profile import get_runtime_profile, resolve_runtime_profile
+
+
+def test_public_profile_constants_are_used_by_lookup():
+    assert get_runtime_profile("full") is runtime_profile.FULL_PROFILE
+    assert get_runtime_profile("vps-lite") is runtime_profile.VPS_LITE_PROFILE
 
 
 def test_full_profile_is_unrestricted_and_permits_plugins_and_stdio_mcp():
@@ -69,6 +75,22 @@ def test_resolve_runtime_profile_uses_environment(monkeypatch):
     monkeypatch.setenv("NANOBOT_PROFILE", " VPS-LITE ")
 
     assert resolve_runtime_profile().name == "vps-lite"
+
+
+@pytest.mark.parametrize("name", ["", "   "])
+def test_resolve_runtime_profile_rejects_explicit_blank_name(name, monkeypatch):
+    monkeypatch.setenv("NANOBOT_PROFILE", "vps-lite")
+
+    with pytest.raises(ValueError, match="Runtime profile name cannot be blank"):
+        resolve_runtime_profile(name)
+
+
+@pytest.mark.parametrize("name", ["", "   "])
+def test_resolve_runtime_profile_rejects_blank_environment_name(name, monkeypatch):
+    monkeypatch.setenv("NANOBOT_PROFILE", name)
+
+    with pytest.raises(ValueError, match="Runtime profile name cannot be blank"):
+        resolve_runtime_profile()
 
 
 def test_resolve_runtime_profile_defaults_to_full(monkeypatch):
