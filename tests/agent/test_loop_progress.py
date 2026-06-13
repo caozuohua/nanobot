@@ -548,6 +548,64 @@ class TestToolEventProgress:
         provider.chat_with_retry.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_tool_rounds_without_deltas_do_not_publish_empty_stream_segments(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Non-streaming provider tool rounds must not create blank channel messages."""
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.supports_progress_deltas = False
+        provider.get_default_model.return_value = "vertex/gemini-3.5-flash"
+        tool_call = ToolCallRequest(id="call1", name="custom_tool", arguments={})
+        responses = iter([
+            LLMResponse(content="", tool_calls=[tool_call]),
+            LLMResponse(content="", tool_calls=[tool_call]),
+            LLMResponse(content="", tool_calls=[tool_call]),
+            LLMResponse(content="Done", tool_calls=[]),
+        ])
+
+        async def chat_stream_with_retry(**_kwargs):
+            return next(responses)
+
+        provider.chat_stream_with_retry = chat_stream_with_retry
+        provider.chat_with_retry = AsyncMock()
+        loop = AgentLoop(
+            bus=bus,
+            provider=provider,
+            workspace=tmp_path,
+            model="vertex/gemini-3.5-flash",
+        )
+        _attach_webui_runtime_events(loop, bus)
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop.tools.prepare_call = MagicMock(return_value=(None, {}, None))
+        loop.tools.execute = AsyncMock(return_value="ok")
+        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+        await loop._dispatch(InboundMessage(
+            channel="feishu",
+            sender_id="u1",
+            chat_id="chat1",
+            content="use tools",
+            metadata={"_wants_stream": True},
+        ))
+
+        outbound = []
+        while bus.outbound_size > 0:
+            outbound.append(await bus.consume_outbound())
+
+        assert not [m for m in outbound if m.metadata.get("_stream_delta")]
+        assert not [m for m in outbound if m.metadata.get("_stream_end")]
+        final = [
+            m for m in outbound
+            if not m.metadata.get("_progress")
+            and not m.metadata.get("_turn_end")
+            and not m.metadata.get("_goal_status")
+        ]
+        assert final[-1].content == "Done"
+        assert final[-1].metadata.get("_streamed") is None
+
+    @pytest.mark.asyncio
     async def test_streamed_progress_is_not_repeated_before_tool_execution(
         self,
         tmp_path: Path,

@@ -1000,6 +1000,10 @@ class AgentLoop:
                             return f"{stream_base_id}:{stream_segment}"
 
                         async def on_stream(delta: str) -> None:
+                            if not delta:
+                                return
+                            setattr(on_stream, "_segment_emitted", True)
+                            setattr(on_stream, "_ever_emitted", True)
                             meta = dict(msg.metadata or {})
                             meta["_stream_delta"] = True
                             meta["_stream_id"] = _current_stream_id()
@@ -1011,6 +1015,8 @@ class AgentLoop:
 
                         async def on_stream_end(*, resuming: bool = False) -> None:
                             nonlocal stream_segment
+                            if not getattr(on_stream, "_segment_emitted", False):
+                                return
                             meta = dict(msg.metadata or {})
                             meta["_stream_end"] = True
                             meta["_resuming"] = resuming
@@ -1021,6 +1027,7 @@ class AgentLoop:
                                 metadata=meta,
                             ))
                             stream_segment += 1
+                            setattr(on_stream, "_segment_emitted", False)
 
                     response = await self._process_message(
                         msg, on_stream=on_stream, on_stream_end=on_stream_end,
@@ -1369,7 +1376,11 @@ class AgentLoop:
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         meta = dict(msg.metadata or {})
-        if on_stream is not None and stop_reason not in {"error", "tool_error"}:
+        if (
+            on_stream is not None
+            and getattr(on_stream, "_ever_emitted", False)
+            and stop_reason not in {"error", "tool_error"}
+        ):
             meta["_streamed"] = True
         if turn_latency_ms is not None:
             meta["latency_ms"] = int(turn_latency_ms)
