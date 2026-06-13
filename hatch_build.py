@@ -23,9 +23,66 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tomllib
 from pathlib import Path
 
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
+from hatchling.metadata.plugin.interface import MetadataHookInterface
+
+_FULL_BUILD_PROFILES = frozenset({"", "full", "default"})
+_VPS_LITE_PROFILE = "vps-lite"
+_LITE_CHANNEL_MODULES = frozenset({
+    "__init__.py",
+    "base.py",
+    "discord.py",
+    "feishu.py",
+    "manager.py",
+    "registry.py",
+    "telegram.py",
+})
+_LITE_PROVIDER_ENTRIES = frozenset({
+    "__init__.py",
+    "base.py",
+    "factory.py",
+    "fallback_provider.py",
+    "openai_compat_provider.py",
+    "openai_responses",
+    "registry.py",
+    "vertex_ai_provider.py",
+})
+_LITE_SKILLS = frozenset({"cron", "memory"})
+
+
+def _build_profile() -> str:
+    profile = os.environ.get("NANOBOT_BUILD_PROFILE", "").strip().lower().replace("_", "-")
+    if profile in _FULL_BUILD_PROFILES:
+        return "full"
+    if profile == _VPS_LITE_PROFILE:
+        return profile
+    raise ValueError(
+        f"Unknown NANOBOT_BUILD_PROFILE {profile!r}. Available profiles: full, vps-lite"
+    )
+
+
+def _build_settings(root: str) -> dict:
+    with (Path(root) / "pyproject.toml").open("rb") as file:
+        return tomllib.load(file)["tool"]["nanobot"]["build"]
+
+
+class NanobotMetadataHook(MetadataHookInterface):
+    """Select dependency metadata for the requested distribution profile."""
+
+    PLUGIN_NAME = "nanobot-metadata"
+
+    def update(self, metadata: dict) -> None:
+        settings = _build_settings(self.root)
+        if _build_profile() == _VPS_LITE_PROFILE:
+            metadata["dependencies"] = settings["vps-lite-dependencies"]
+            metadata["optional-dependencies"] = {}
+            return
+
+        metadata["dependencies"] = settings["full-dependencies"]
+        metadata["optional-dependencies"] = settings["full-optional-dependencies"]
 
 
 class WebUIBuildHook(BuildHookInterface):
@@ -33,6 +90,11 @@ class WebUIBuildHook(BuildHookInterface):
 
     def initialize(self, version: str, build_data: dict) -> None:  # noqa: D401
         root = Path(self.root)
+        if _build_profile() == _VPS_LITE_PROFILE:
+            self._configure_vps_lite_wheel(root)
+            self.app.display_info("[webui-build] skipped for vps-lite build profile")
+            return
+
         webui_dir = root / "webui"
         package_json = webui_dir / "package.json"
         dist_dir = root / "nanobot" / "web" / "dist"
@@ -83,6 +145,35 @@ class WebUIBuildHook(BuildHookInterface):
                 "check webui/vite.config.ts outDir."
             )
         self.app.display_info(f"[webui-build] webui ready at {dist_dir}")
+
+    def _configure_vps_lite_wheel(self, root: Path) -> None:
+        if self.target_name != "wheel":
+            return
+
+        excluded = [
+            "/nanobot/webui/",
+            "/nanobot/web/",
+        ]
+        excluded.extend(
+            f"/nanobot/channels/{path.name}"
+            for path in (root / "nanobot" / "channels").glob("*.py")
+            if path.name not in _LITE_CHANNEL_MODULES
+        )
+        excluded.extend(
+            f"/nanobot/providers/{path.name}"
+            for path in (root / "nanobot" / "providers").iterdir()
+            if path.name not in _LITE_PROVIDER_ENTRIES
+        )
+        excluded.extend(
+            f"/nanobot/skills/{path.name}/"
+            for path in (root / "nanobot" / "skills").iterdir()
+            if path.is_dir() and path.name not in _LITE_SKILLS
+        )
+
+        target_config = self.build_config.target_config
+        target_config["exclude"] = excluded
+        target_config["artifacts"] = []
+        target_config["force-include"] = {}
 
     @staticmethod
     def _pick_runner() -> str | None:

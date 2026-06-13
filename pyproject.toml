@@ -17,12 +17,14 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
+dynamic = ["dependencies", "optional-dependencies"]
 license-files = [
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
 ]
 
-dependencies = [
+[tool.nanobot.build]
+full-dependencies = [
     "typer>=0.20.0,<1.0.0",
     "anthropic>=0.45.0,<1.0.0",
     "pydantic>=2.12.0,<3.0.0",
@@ -65,7 +67,33 @@ dependencies = [
     "boto3>=1.43.0",
 ]
 
-[project.optional-dependencies]
+vps-lite-dependencies = [
+    "typer>=0.20.0,<1.0.0",
+    "pydantic>=2.12.0,<3.0.0",
+    "pydantic-settings>=2.12.0,<3.0.0",
+    "httpx>=0.28.0,<1.0.0",
+    "ddgs>=9.5.5,<10.0.0",
+    "loguru>=0.7.3,<1.0.0",
+    "readability-lxml>=0.8.4,<1.0.0",
+    "lxml-html-clean>=0.4.0,<1.0.0",
+    "rich>=14.0.0,<15.0.0",
+    "croniter>=6.0.0,<7.0.0",
+    "filelock>=3.25.2",
+    "python-telegram-bot[socks,webhooks]>=22.6,<23.0",
+    "lark-oapi>=1.5.0,<2.0.0",
+    "discord.py>=2.5.2,<3.0.0",
+    "prompt-toolkit>=3.0.50,<4.0.0",
+    "mcp>=1.26.0,<2.0.0",
+    "json-repair>=0.57.0,<1.0.0",
+    "chardet>=3.0.2,<6.0.0",
+    "openai>=2.8.0",
+    "google-genai>=1.0.0,<2.0.0",
+    "tiktoken>=0.12.0,<1.0.0",
+    "jinja2>=3.1.0,<4.0.0",
+    "pyyaml>=6.0,<7.0.0",
+]
+
+[tool.nanobot.build.full-optional-dependencies]
 api = [
     "aiohttp>=3.9.0,<4.0.0",
 ]
@@ -125,6 +153,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.metadata]
 allow-direct-references = true
+
+[tool.hatch.metadata.hooks.custom]
+# Dynamic dependency selection lives in the conventional `hatch_build.py`.
 
 [tool.hatch.build.hooks.custom]
 # Implementation lives in the conventional `hatch_build.py` at the repo root.
