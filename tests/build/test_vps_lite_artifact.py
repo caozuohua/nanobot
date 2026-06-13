@@ -66,6 +66,7 @@ SUPPORTED_PROVIDER_MODULES = {
     "base.py",
     "factory.py",
     "fallback_provider.py",
+    "image_generation.py",
     "openai_compat_provider.py",
     "registry.py",
     "vertex_ai_provider.py",
@@ -179,6 +180,29 @@ def test_vps_lite_wheel_exposes_nanobot_cli(lite_wheel: Path) -> None:
 
     assert "[console_scripts]" in entry_points
     assert "nanobot = nanobot.cli.commands:app" in entry_points
+
+
+def test_vps_lite_wheel_can_load_config_schema(lite_wheel: Path, tmp_path: Path) -> None:
+    venv = tmp_path / "venv"
+    subprocess.run([sys.executable, "-m", "venv", str(venv)], check=True)
+    python = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    subprocess.run(
+        [str(python), "-m", "pip", "install", "--quiet", str(lite_wheel)],
+        check=True,
+    )
+    subprocess.run(
+        [
+            str(python),
+            "-c",
+            (
+                "from nanobot.config.schema import Config; "
+                "from nanobot.runtime_profile import VPS_LITE_PROFILE; "
+                "c=Config(); c.tools.my.enable=False; "
+                "c.validate_runtime_profile(VPS_LITE_PROFILE)"
+            ),
+        ],
+        check=True,
+    )
 
 
 def test_default_wheel_keeps_full_dependency_metadata(

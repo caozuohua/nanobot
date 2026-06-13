@@ -45,6 +45,7 @@ _LITE_PROVIDER_ENTRIES = frozenset({
     "base.py",
     "factory.py",
     "fallback_provider.py",
+    "image_generation.py",
     "openai_compat_provider.py",
     "openai_responses",
     "registry.py",
