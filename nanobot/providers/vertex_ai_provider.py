@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import uuid
 from typing import Any
@@ -156,7 +157,7 @@ class VertexAIProvider(LLMProvider):
                     name = str(_get(function, "name", "") or "")
                     if call_id:
                         tool_names[call_id] = name
-                    parts.append({
+                    part = {
                         "function_call": {
                             "id": call_id or None,
                             "name": name,
@@ -164,7 +165,19 @@ class VertexAIProvider(LLMProvider):
                                 _get(function, "arguments", {})
                             ),
                         }
-                    })
+                    }
+                    extra_content = _get(tool_call, "extra_content", {}) or {}
+                    google_extra = _get(extra_content, "google", {}) or {}
+                    encoded_signature = _get(google_extra, "thought_signature")
+                    if isinstance(encoded_signature, str) and encoded_signature:
+                        try:
+                            part["thought_signature"] = base64.b64decode(
+                                encoded_signature,
+                                validate=True,
+                            )
+                        except ValueError:
+                            pass
+                    parts.append(part)
             contents.append({
                 "role": "model" if role == "assistant" else "user",
                 "parts": parts,
@@ -231,10 +244,21 @@ class VertexAIProvider(LLMProvider):
                 text_parts.append(str(text))
             function_call = _get(part, "function_call")
             if function_call:
+                thought_signature = _get(part, "thought_signature")
+                extra_content = None
+                if isinstance(thought_signature, bytes) and thought_signature:
+                    extra_content = {
+                        "google": {
+                            "thought_signature": base64.b64encode(
+                                thought_signature
+                            ).decode("ascii"),
+                        }
+                    }
                 tool_calls.append(ToolCallRequest(
                     id=str(_get(function_call, "id") or f"call_{uuid.uuid4().hex}"),
                     name=str(_get(function_call, "name") or ""),
                     arguments=_get(function_call, "args", {}) or {},
+                    extra_content=extra_content,
                 ))
 
         finish_value = _get(candidate, "finish_reason", "STOP")

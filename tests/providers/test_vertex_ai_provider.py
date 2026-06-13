@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -196,6 +197,32 @@ def test_tool_history_replays_function_call_without_synthetic_text() -> None:
         }],
     }
     assert contents[1]["parts"][0]["function_response"]["name"] == "read_file"
+
+
+def test_parse_and_replay_preserves_thought_signature() -> None:
+    signature = b"opaque-thought-signature"
+    function_call = SimpleNamespace(
+        id="call-123",
+        name="web_search",
+        args={"query": "nanobot"},
+    )
+    response = _response(function_call=function_call)
+    response.candidates[0].content.parts[0].thought_signature = signature
+
+    parsed = VertexAIProvider._parse_response(response)
+    payload = parsed.tool_calls[0].to_openai_tool_call()
+    _, contents = VertexAIProvider._convert_messages([{
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [payload],
+    }])
+
+    assert parsed.tool_calls[0].extra_content == {
+        "google": {
+            "thought_signature": base64.b64encode(signature).decode("ascii"),
+        }
+    }
+    assert contents[0]["parts"][0]["thought_signature"] == signature
 
 
 def test_factory_builds_vertex_provider_with_project_and_location() -> None:
