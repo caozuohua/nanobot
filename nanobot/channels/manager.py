@@ -18,6 +18,7 @@ from nanobot.config.schema import Config
 from nanobot.utils.restart import consume_restart_notice_from_env, format_restart_completed_message
 
 if TYPE_CHECKING:
+    from nanobot.runtime_profile import RuntimeProfile
     from nanobot.session.manager import SessionManager
 
 
@@ -62,9 +63,13 @@ class ChannelManager:
         webui_static_dist: bool = True,
         webui_runtime_surface: str = "browser",
         webui_runtime_capabilities: dict[str, Any] | None = None,
+        runtime_profile: "RuntimeProfile | None" = None,
     ):
+        from nanobot.runtime_profile import resolve_runtime_profile
+
         self.config = config
         self.bus = bus
+        self.runtime_profile = runtime_profile or resolve_runtime_profile()
         self._session_manager = session_manager
         self._cron_service = cron_service
         self._webui_runtime_model_name = webui_runtime_model_name
@@ -81,12 +86,16 @@ class ChannelManager:
     def _init_channels(self) -> None:
         """Initialize channels discovered via pkgutil scan + entry_points plugins."""
         from nanobot.channels.registry import discover_channel_names, discover_enabled
+        from nanobot.runtime_profile import resolve_runtime_profile
+
+        profile = getattr(self, "runtime_profile", None) or resolve_runtime_profile()
+        self.runtime_profile = profile
 
         # Collect enabled module names first, then only import those.
         # Channel configs live in ChannelsConfig's extra fields (via
         # extra="allow"), so we enumerate candidates from pkgutil scan
         # (cheap, no imports) and any plugin keys in __pydantic_extra__.
-        names = discover_channel_names()
+        names = discover_channel_names(profile)
         candidate_names = set(names)
         extra = getattr(self.config.channels, "__pydantic_extra__", None) or {}
         candidate_names.update(extra.keys())
@@ -103,7 +112,23 @@ class ChannelManager:
             ):
                 enabled_names.add(name)
 
-        for name, cls in discover_enabled(enabled_names, _names=names).items():
+        if profile.channels is not None:
+            unavailable = sorted(enabled_names - profile.channels)
+            if unavailable:
+                if len(unavailable) == 1:
+                    detail = f"Channel '{unavailable[0]}' is"
+                else:
+                    quoted = ", ".join(f"'{name}'" for name in unavailable)
+                    detail = f"Channels {quoted} are"
+                raise ValueError(
+                    f"{detail} not available in runtime profile '{profile.name}'"
+                )
+
+        for name, cls in discover_enabled(
+            enabled_names,
+            _names=names,
+            profile=profile,
+        ).items():
             section = getattr(self.config.channels, name, None)
             if section is None:
                 continue
