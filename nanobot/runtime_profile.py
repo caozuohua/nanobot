@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import Any
+
+
+class RuntimeProfileError(RuntimeError):
+    """Raised when a runtime profile cannot support a requested capability."""
 
 
 @dataclass(frozen=True)
@@ -17,6 +22,51 @@ class RuntimeProfile:
     skills: frozenset[str] | None
     allow_entrypoint_plugins: bool
     allow_stdio_mcp: bool
+
+    @classmethod
+    def coerce(cls, value: RuntimeProfile | str | None) -> RuntimeProfile:
+        """Normalize a profile object or name."""
+        if isinstance(value, cls):
+            return value
+        return resolve_runtime_profile(value)
+
+    @property
+    def is_lite(self) -> bool:
+        return self.name == "vps-lite"
+
+    @property
+    def tool_module_allowlist(self) -> frozenset[str] | None:
+        return self.tools
+
+    @property
+    def builtin_skill_allowlist(self) -> frozenset[str] | None:
+        return self.skills
+
+    @property
+    def entrypoint_plugins_enabled(self) -> bool:
+        return self.allow_entrypoint_plugins
+
+    def validate_tools_config(self, tools_config: Any) -> None:
+        """Fail fast when the profile cannot support configured tools."""
+        if not self.is_lite or tools_config is None:
+            return
+
+        blocked: list[str] = []
+        checks = (
+            ("my", "enable"),
+            ("image_generation", "enabled"),
+            ("cli_apps", "enable"),
+        )
+        for section_name, flag_name in checks:
+            section = getattr(tools_config, section_name, None)
+            if getattr(section, flag_name, False):
+                blocked.append(f"tools.{section_name}.{flag_name}")
+
+        if blocked:
+            raise RuntimeProfileError(
+                f"Runtime profile {self.name!r} does not support: {', '.join(blocked)}. "
+                "Disable those capabilities or switch to the full profile."
+            )
 
 
 FULL_PROFILE = RuntimeProfile(
@@ -47,9 +97,11 @@ _PROFILES = {
 
 def get_runtime_profile(name: str) -> RuntimeProfile:
     """Return a named runtime profile."""
-    normalized = name.strip().lower()
+    normalized = name.strip().lower().replace("_", "-")
     if not normalized:
         raise ValueError("Runtime profile name cannot be blank")
+    aliases = {"default": "full", "lite": "vps-lite"}
+    normalized = aliases.get(normalized, normalized)
     try:
         return _PROFILES[normalized]
     except KeyError:

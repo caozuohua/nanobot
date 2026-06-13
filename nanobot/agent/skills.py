@@ -8,6 +8,8 @@ from pathlib import Path
 
 import yaml
 
+from nanobot.runtime_profile import RuntimeProfile
+
 # Default builtin skills directory (relative to this file)
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
 
@@ -26,13 +28,36 @@ class SkillsLoader:
     specific tools or perform certain tasks.
     """
 
-    def __init__(self, workspace: Path, builtin_skills_dir: Path | None = None, disabled_skills: set[str] | None = None):
+    def __init__(
+        self,
+        workspace: Path,
+        builtin_skills_dir: Path | None = None,
+        disabled_skills: set[str] | None = None,
+        *,
+        profile: RuntimeProfile | str | None = None,
+        builtin_allowlist: set[str] | None = None,
+    ):
         self.workspace = workspace
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
         self.disabled_skills = disabled_skills or set()
+        self.profile = RuntimeProfile.coerce(profile)
+        profile_allowlist = self.profile.builtin_skill_allowlist
+        if profile_allowlist is None:
+            self.builtin_allowlist = frozenset(builtin_allowlist) if builtin_allowlist is not None else None
+        elif builtin_allowlist is None:
+            self.builtin_allowlist = profile_allowlist
+        else:
+            self.builtin_allowlist = frozenset(builtin_allowlist) & profile_allowlist
 
-    def _skill_entries_from_dir(self, base: Path, source: str, *, skip_names: set[str] | None = None) -> list[dict[str, str]]:
+    def _skill_entries_from_dir(
+        self,
+        base: Path,
+        source: str,
+        *,
+        skip_names: set[str] | None = None,
+        allow_names: set[str] | None = None,
+    ) -> list[dict[str, str]]:
         if not base.exists():
             return []
         entries: list[dict[str, str]] = []
@@ -44,6 +69,8 @@ class SkillsLoader:
                 continue
             name = skill_dir.name
             if skip_names is not None and name in skip_names:
+                continue
+            if allow_names is not None and name not in allow_names:
                 continue
             entries.append({"name": name, "path": str(skill_file), "source": source})
         return entries
@@ -62,7 +89,12 @@ class SkillsLoader:
         workspace_names = {entry["name"] for entry in skills}
         if self.builtin_skills and self.builtin_skills.exists():
             skills.extend(
-                self._skill_entries_from_dir(self.builtin_skills, "builtin", skip_names=workspace_names)
+                self._skill_entries_from_dir(
+                    self.builtin_skills,
+                    "builtin",
+                    skip_names=workspace_names,
+                    allow_names=self.builtin_allowlist,
+                )
             )
 
         if self.disabled_skills:
@@ -87,7 +119,7 @@ class SkillsLoader:
             roots.append(self.builtin_skills)
         for root in roots:
             path = root / name / "SKILL.md"
-            if path.exists():
+            if path.exists() and (root != self.builtin_skills or self.builtin_allowlist is None or name in self.builtin_allowlist):
                 return path.read_text(encoding="utf-8")
         return None
 

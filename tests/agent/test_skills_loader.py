@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.skills import SkillsLoader
+from nanobot.runtime_profile import RuntimeProfile
 
 
 def _write_skill(
@@ -310,6 +311,48 @@ def test_disabled_skills_excluded_from_get_always_skills(tmp_path: Path) -> None
     always = loader.get_always_skills()
     assert "alpha" not in always
     assert "beta" in always
+
+
+def test_lite_profile_filters_builtin_skills_but_keeps_workspace_override(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    ws_skills = workspace / "skills"
+    ws_skills.mkdir(parents=True)
+    ws_my = _write_skill(ws_skills, "my", metadata_json={"always": True}, body="# Workspace my")
+    ws_cron = _write_skill(ws_skills, "cron", body="# Workspace cron")
+
+    builtin = tmp_path / "builtin"
+    bi_my = _write_skill(builtin, "my", metadata_json={"always": True}, body="# Builtin my")
+    bi_image = _write_skill(builtin, "image-generation", body="# Builtin image")
+    bi_long = _write_skill(builtin, "long-goal", body="# Builtin long goal")
+    bi_cron = _write_skill(builtin, "cron", body="# Builtin cron")
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin, profile=RuntimeProfile.VPS_LITE)
+    entries = sorted(loader.list_skills(filter_unavailable=False), key=lambda item: (item["source"], item["name"]))
+
+    assert {"name": "my", "path": str(ws_my), "source": "workspace"} in entries
+    assert {"name": "cron", "path": str(ws_cron), "source": "workspace"} in entries
+    assert {"name": "cron", "path": str(bi_cron), "source": "builtin"} not in entries
+    assert {"name": "my", "path": str(bi_my), "source": "builtin"} not in entries
+    assert {"name": "image-generation", "path": str(bi_image), "source": "builtin"} not in entries
+    assert {"name": "long-goal", "path": str(bi_long), "source": "builtin"} not in entries
+
+
+def test_builtin_allowlist_applies_only_to_builtins(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    ws_skills = workspace / "skills"
+    ws_skills.mkdir(parents=True)
+    ws_path = _write_skill(ws_skills, "alpha", body="# Workspace alpha")
+
+    builtin = tmp_path / "builtin"
+    bi_alpha = _write_skill(builtin, "alpha", body="# Builtin alpha")
+    bi_beta = _write_skill(builtin, "beta", body="# Builtin beta")
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin, builtin_allowlist={"beta"})
+    entries = sorted(loader.list_skills(filter_unavailable=False), key=lambda item: item["name"])
+
+    assert {"name": "alpha", "path": str(ws_path), "source": "workspace"} in entries
+    assert {"name": "alpha", "path": str(bi_alpha), "source": "builtin"} not in entries
+    assert {"name": "beta", "path": str(bi_beta), "source": "builtin"} in entries
 
 
 # -- multiline description tests (YAML folded > and literal |) -----------------

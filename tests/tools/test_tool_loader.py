@@ -1,14 +1,20 @@
 """Tests for tool plugin architecture: ToolLoader, ToolContext, metadata."""
 from __future__ import annotations
 
+import importlib
 from dataclasses import fields
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
+
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.loader import _SKIP_MODULES, ToolLoader
+from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.config.schema import ToolsConfig
+from nanobot.runtime_profile import RuntimeProfile, RuntimeProfileError
 
 
 class _MinimalTool(Tool):
@@ -116,9 +122,6 @@ def test_loader_registers_exec_with_real_tools_config(tmp_path):
     """Real config objects catch bad ctx.config attribute paths that mocks hide."""
     from types import SimpleNamespace
 
-    from nanobot.agent.tools.registry import ToolRegistry
-    from nanobot.config.schema import ToolsConfig
-
     ctx = ToolContext(
         config=ToolsConfig(),
         workspace=str(tmp_path),
@@ -135,6 +138,67 @@ def test_loader_registers_exec_with_real_tools_config(tmp_path):
 
     assert "exec" in registered
     assert registry.has("exec")
+
+
+def test_loader_module_allowlist_limits_discovery():
+    loader = ToolLoader(module_allowlist={"web"})
+    discovered = loader.discover()
+    module_names = {cls.__module__.rsplit(".", 1)[-1] for cls in discovered}
+
+    assert module_names == {"web"}
+
+
+def test_lite_profile_filters_modules_before_import(monkeypatch):
+    allowed = {"filesystem", "apply_patch", "shell", "web", "cron", "message"}
+    imported: list[str] = []
+    original_import = importlib.import_module
+
+    def guarded_import(name, package=None):
+        if package == "nanobot.agent.tools" and name.startswith("."):
+            module_name = name.lstrip(".")
+            assert module_name in allowed, f"unexpected tool module import: {module_name}"
+            imported.append(module_name)
+        return original_import(name, package)
+
+    monkeypatch.setattr("nanobot.agent.tools.loader.importlib.import_module", guarded_import)
+    loader = ToolLoader(profile=RuntimeProfile.VPS_LITE)
+
+    discovered = loader.discover()
+    module_names = {cls.__module__.rsplit(".", 1)[-1] for cls in discovered}
+
+    assert imported
+    assert module_names <= allowed
+    assert {"my", "image_generation", "spawn", "long_task", "cli_apps"}.isdisjoint(module_names)
+
+
+def test_lite_profile_disables_entrypoint_plugins(monkeypatch):
+    def fail_entry_points(*_args, **_kwargs):
+        raise AssertionError("entry_points should not be queried in vps-lite")
+
+    monkeypatch.setattr("nanobot.agent.tools.loader.entry_points", fail_entry_points)
+    loader = ToolLoader(profile=RuntimeProfile.VPS_LITE)
+
+    assert loader._discover_plugins() == {}
+
+
+@pytest.mark.parametrize(
+    ("mutator", "expected_fragment"),
+    [
+        (lambda tools: None, "tools.my.enable"),
+        (lambda tools: setattr(tools.image_generation, "enabled", True), "tools.image_generation.enabled"),
+        (lambda tools: setattr(tools.cli_apps, "enable", True), "tools.cli_apps.enable"),
+    ],
+)
+def test_lite_profile_raises_for_configured_excluded_capabilities(
+    mutator, expected_fragment
+):
+    tools = ToolsConfig()
+    mutator(tools)
+    ctx = ToolContext(config=tools, workspace="/tmp")
+    loader = ToolLoader(profile=RuntimeProfile.VPS_LITE)
+
+    with pytest.raises(RuntimeProfileError, match=expected_fragment):
+        loader.load(ctx, registry=ToolRegistry())
 
 
 # --- Task 4: _FsTool.create() ---
