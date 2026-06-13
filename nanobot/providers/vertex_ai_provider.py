@@ -272,8 +272,12 @@ class VertexAIProvider(LLMProvider):
         else:
             finish_reason = finish_name.lower()
 
+        response_text = "".join(text_parts) or None
+        if tool_calls and response_text and response_text.strip().lower() == "(empty)":
+            response_text = None
+
         return LLMResponse(
-            content="".join(text_parts) or None,
+            content=response_text,
             tool_calls=tool_calls,
             finish_reason=finish_reason,
             usage=cls._extract_usage(response),

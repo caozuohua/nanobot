@@ -225,6 +225,21 @@ def test_parse_and_replay_preserves_thought_signature() -> None:
     assert contents[0]["parts"][0]["thought_signature"] == signature
 
 
+def test_parse_suppresses_empty_placeholder_beside_function_call() -> None:
+    function_call = SimpleNamespace(
+        id="call-123",
+        name="exec",
+        args={"command": "ls"},
+    )
+    response = _response(text="(empty)", function_call=function_call)
+
+    parsed = VertexAIProvider._parse_response(response)
+
+    assert parsed.content is None
+    assert parsed.finish_reason == "tool_calls"
+    assert len(parsed.tool_calls) == 1
+
+
 def test_factory_builds_vertex_provider_with_project_and_location() -> None:
     config = Config.model_validate({
         "agents": {
