@@ -9,6 +9,7 @@ from nanobot.config.schema import Config, InlineFallbackConfig, ModelPresetConfi
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.fallback_provider import FallbackProvider
 from nanobot.providers.registry import create_dynamic_spec, find_by_name
+from nanobot.runtime_profile import RuntimeProfile, RuntimeProfileError
 
 
 @dataclass(frozen=True)
@@ -28,17 +29,55 @@ def _resolve_model_preset(
     return preset if preset is not None else config.resolve_preset(preset_name)
 
 
+def _resolve_explicit_profile(
+    profile: RuntimeProfile | str | None,
+) -> RuntimeProfile | None:
+    """Resolve only explicitly supplied profiles, preserving legacy defaults."""
+    return None if profile is None else RuntimeProfile.coerce(profile)
+
+
+def _validate_provider_profile(
+    provider_name: str | None,
+    profile: RuntimeProfile | None,
+) -> None:
+    if profile is None or profile.providers is None or not provider_name:
+        return
+    capability = provider_name if find_by_name(provider_name) else "custom"
+    if capability in profile.providers:
+        return
+    available = ", ".join(sorted(profile.providers))
+    raise RuntimeProfileError(
+        f"Provider '{provider_name}' is not available in runtime profile "
+        f"'{profile.name}'. Available providers: {available}. "
+        "Switch to the full profile to use this provider."
+    )
+
+
+def _validate_preset_profile(
+    config: Config,
+    preset: ModelPresetConfig,
+    profile: RuntimeProfile | None,
+    *,
+    model: str | None = None,
+) -> None:
+    selected_model = model or preset.model
+    provider_name = config.get_provider_name(selected_model, preset=preset)
+    _validate_provider_profile(provider_name, profile)
+
+
 def _make_provider_core(
     config: Config,
     *,
     preset_name: str | None = None,
     preset: ModelPresetConfig | None = None,
     model: str | None = None,
+    profile: RuntimeProfile | None = None,
 ) -> LLMProvider:
     """Create a plain LLM provider without failover wrapping."""
     resolved = _resolve_model_preset(config, preset_name=preset_name, preset=preset)
     model = model or resolved.model
     provider_name = config.get_provider_name(model, preset=resolved)
+    _validate_provider_profile(provider_name, profile)
     p = config.get_provider(model, preset=resolved)
     spec = find_by_name(provider_name) if provider_name else None
     if provider_name and not spec and p:
@@ -102,6 +141,14 @@ def _make_provider_core(
             profile=getattr(p, "profile", None) if p else None,
             extra_body=p.extra_body if p else None,
         )
+    elif backend == "vertex_ai":
+        from nanobot.providers.vertex_ai_provider import VertexAIProvider
+
+        provider = VertexAIProvider(
+            project=getattr(p, "project", None) if p else None,
+            location=getattr(p, "location", None) if p else None,
+            default_model=model,
+        )
     else:
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
@@ -156,22 +203,35 @@ def make_provider(
     preset_name: str | None = None,
     preset: ModelPresetConfig | None = None,
     model: str | None = None,
+    profile: RuntimeProfile | str | None = None,
 ) -> LLMProvider:
     """Create the LLM provider implied by config.
 
     When *model* is given, it overrides the resolved/preset model — used by
     the failover path to create providers for fallback models.
     """
+    runtime_profile = _resolve_explicit_profile(profile)
     resolved = _resolve_model_preset(config, preset_name=preset_name, preset=preset)
-    provider = _make_provider_core(config, preset_name=preset_name, preset=preset, model=model)
+    provider = _make_provider_core(
+        config,
+        preset_name=preset_name,
+        preset=preset,
+        model=model,
+        profile=runtime_profile,
+    )
     fallback_presets = _resolve_fallback_presets(config, resolved)
 
     if fallback_presets:
+        for fallback in fallback_presets:
+            _validate_preset_profile(config, fallback, runtime_profile)
         provider = FallbackProvider(
             primary=provider,
             fallback_presets=fallback_presets,
             provider_factory=lambda fb: _make_provider_core(
-                config, preset_name=preset_name, preset=fb
+                config,
+                preset_name=preset_name,
+                preset=fb,
+                profile=runtime_profile,
             ),
         )
 
@@ -183,11 +243,16 @@ def provider_signature(
     *,
     preset_name: str | None = None,
     preset: ModelPresetConfig | None = None,
+    profile: RuntimeProfile | str | None = None,
 ) -> tuple[object, ...]:
     """Return the config fields that affect the active provider chain."""
+    runtime_profile = _resolve_explicit_profile(profile)
     resolved = _resolve_model_preset(config, preset_name=preset_name, preset=preset)
+    _validate_preset_profile(config, resolved, runtime_profile)
     p = config.get_provider(resolved.model, preset=resolved)
     fallback_presets = _resolve_fallback_presets(config, resolved)
+    for fallback in fallback_presets:
+        _validate_preset_profile(config, fallback, runtime_profile)
 
     def _fallback_signature(fallback: ModelPresetConfig) -> tuple[object, ...]:
         fp = config.get_provider(fallback.model, preset=fallback)
@@ -207,6 +272,8 @@ def provider_signature(
             fallback.temperature,
             fallback.reasoning_effort,
             fallback.context_window_tokens,
+            getattr(fp, "project", None) if fp else None,
+            getattr(fp, "location", None) if fp else None,
         )
 
     return (
@@ -225,6 +292,9 @@ def provider_signature(
         resolved.temperature,
         resolved.reasoning_effort,
         resolved.context_window_tokens,
+        getattr(p, "project", None) if p else None,
+        getattr(p, "location", None) if p else None,
+        runtime_profile.name if runtime_profile else None,
         tuple(_fallback_signature(fallback) for fallback in fallback_presets),
     )
 
@@ -234,6 +304,7 @@ def build_provider_snapshot(
     *,
     preset_name: str | None = None,
     preset: ModelPresetConfig | None = None,
+    profile: RuntimeProfile | str | None = None,
 ) -> ProviderSnapshot:
     resolved = _resolve_model_preset(config, preset_name=preset_name, preset=preset)
     fallback_windows = [
@@ -241,10 +312,10 @@ def build_provider_snapshot(
         for fallback in _resolve_fallback_presets(config, resolved)
     ]
     return ProviderSnapshot(
-        provider=make_provider(config, preset=resolved),
+        provider=make_provider(config, preset=resolved, profile=profile),
         model=resolved.model,
         context_window_tokens=min([resolved.context_window_tokens, *fallback_windows]),
-        signature=provider_signature(config, preset=resolved),
+        signature=provider_signature(config, preset=resolved, profile=profile),
     )
 
 
@@ -252,10 +323,12 @@ def load_provider_snapshot(
     config_path: Path | None = None,
     *,
     preset_name: str | None = None,
+    profile: RuntimeProfile | str | None = None,
 ) -> ProviderSnapshot:
     from nanobot.config.loader import load_config, resolve_config_env_vars
 
     return build_provider_snapshot(
         resolve_config_env_vars(load_config(config_path)),
         preset_name=preset_name,
+        profile=profile,
     )

@@ -1,0 +1,285 @@
+"""Vertex AI provider backed by the optional Google Gen AI SDK."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import uuid
+from typing import Any
+
+from nanobot.providers.base import (
+    LLMProvider,
+    LLMResponse,
+    ToolCallRequest,
+    tool_arguments_object_for_replay,
+)
+
+genai: Any = None
+
+
+def _get(value: Any, name: str, default: Any = None) -> Any:
+    if isinstance(value, dict):
+        return value.get(name, default)
+    return getattr(value, name, default)
+
+
+class VertexAIProvider(LLMProvider):
+    """Google Vertex AI Gemini provider using ADC authentication."""
+
+    def __init__(
+        self,
+        *,
+        project: str | None = None,
+        location: str | None = None,
+        default_model: str = "gemini-2.5-flash",
+    ) -> None:
+        super().__init__()
+        self.project = project
+        self.location = location
+        self.default_model = default_model
+        self._client: Any = None
+        self._client_lock = asyncio.Lock()
+
+    @staticmethod
+    def _load_sdk() -> Any:
+        global genai
+        if genai is None:
+            try:
+                from google import genai as google_genai
+            except ImportError as exc:
+                raise RuntimeError(
+                    "Vertex AI requires the 'google-genai' package. "
+                    "Install it with: pip install google-genai"
+                ) from exc
+            genai = google_genai
+        return genai
+
+    async def _ensure_client(self) -> Any:
+        if self._client is not None:
+            return self._client
+        async with self._client_lock:
+            if self._client is None:
+                sdk = self._load_sdk()
+                self._client = sdk.Client(
+                    vertexai=True,
+                    project=self.project,
+                    location=self.location,
+                )
+        return self._client
+
+    @staticmethod
+    def _request_model_name(model: str) -> str:
+        if "/" not in model:
+            return model
+        prefix, routed_model = model.split("/", 1)
+        if prefix.lower().replace("-", "_") == "vertex_ai":
+            return routed_model
+        return model
+
+    @staticmethod
+    def _content_parts(content: Any) -> list[dict[str, Any]]:
+        if isinstance(content, str):
+            return [{"text": content or "(empty)"}]
+        if isinstance(content, list):
+            parts: list[dict[str, Any]] = []
+            for block in content:
+                if isinstance(block, str):
+                    parts.append({"text": block})
+                elif isinstance(block, dict) and block.get("type") in {
+                    "text",
+                    "input_text",
+                    "output_text",
+                }:
+                    if block.get("text"):
+                        parts.append({"text": block["text"]})
+            return parts or [{"text": "(empty)"}]
+        if content is None:
+            return [{"text": "(empty)"}]
+        return [{"text": str(content)}]
+
+    @classmethod
+    def _convert_messages(
+        cls,
+        messages: list[dict[str, Any]],
+    ) -> tuple[str | None, list[dict[str, Any]]]:
+        system_parts: list[str] = []
+        contents: list[dict[str, Any]] = []
+        tool_names: dict[str, str] = {}
+
+        for message in messages:
+            role = message.get("role")
+            if role == "system":
+                content = message.get("content")
+                if isinstance(content, str) and content:
+                    system_parts.append(content)
+                continue
+
+            if role == "tool":
+                name = tool_names.get(str(message.get("tool_call_id") or ""))
+                name = name or str(message.get("name") or "tool")
+                raw_content = message.get("content")
+                if isinstance(raw_content, str):
+                    try:
+                        parsed = json.loads(raw_content)
+                    except (TypeError, ValueError):
+                        parsed = raw_content
+                else:
+                    parsed = raw_content
+                response = parsed if isinstance(parsed, dict) else {"result": parsed}
+                contents.append({
+                    "role": "user",
+                    "parts": [{"function_response": {"name": name, "response": response}}],
+                })
+                continue
+
+            tool_calls = message.get("tool_calls") or []
+            parts = (
+                []
+                if role == "assistant" and tool_calls and message.get("content") is None
+                else cls._content_parts(message.get("content"))
+            )
+            if role == "assistant":
+                for tool_call in tool_calls:
+                    function = _get(tool_call, "function", {})
+                    call_id = str(_get(tool_call, "id", "") or "")
+                    name = str(_get(function, "name", "") or "")
+                    if call_id:
+                        tool_names[call_id] = name
+                    parts.append({
+                        "function_call": {
+                            "id": call_id or None,
+                            "name": name,
+                            "args": tool_arguments_object_for_replay(
+                                _get(function, "arguments", {})
+                            ),
+                        }
+                    })
+            contents.append({
+                "role": "model" if role == "assistant" else "user",
+                "parts": parts,
+            })
+
+        return ("\n\n".join(system_parts) or None), contents
+
+    @staticmethod
+    def _convert_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        declarations = []
+        for tool in tools:
+            function = tool.get("function", tool)
+            declarations.append({
+                "name": function.get("name"),
+                "description": function.get("description"),
+                "parameters_json_schema": function.get("parameters") or {
+                    "type": "object",
+                    "properties": {},
+                },
+            })
+        return [{"function_declarations": declarations}]
+
+    @staticmethod
+    def _tool_config(tool_choice: str | dict[str, Any] | None) -> dict[str, Any] | None:
+        if tool_choice in (None, "auto"):
+            return None
+        mode = "ANY" if tool_choice == "required" or isinstance(tool_choice, dict) else "NONE"
+        function_config: dict[str, Any] = {"mode": mode}
+        if isinstance(tool_choice, dict):
+            function = tool_choice.get("function", tool_choice)
+            if function.get("name"):
+                function_config["allowed_function_names"] = [function["name"]]
+        return {"function_calling_config": function_config}
+
+    @staticmethod
+    def _extract_usage(response: Any) -> dict[str, int]:
+        usage = _get(response, "usage_metadata")
+        if not usage:
+            return {}
+        result = {
+            "prompt_tokens": int(_get(usage, "prompt_token_count", 0) or 0),
+            "completion_tokens": int(_get(usage, "candidates_token_count", 0) or 0),
+            "total_tokens": int(_get(usage, "total_token_count", 0) or 0),
+        }
+        cached = int(_get(usage, "cached_content_token_count", 0) or 0)
+        if cached:
+            result["cached_tokens"] = cached
+        return result
+
+    @classmethod
+    def _parse_response(cls, response: Any) -> LLMResponse:
+        candidates = _get(response, "candidates", []) or []
+        if not candidates:
+            return LLMResponse(content="Error: Vertex AI returned no candidates.", finish_reason="error")
+
+        candidate = candidates[0]
+        content = _get(candidate, "content")
+        parts = _get(content, "parts", []) or []
+        text_parts: list[str] = []
+        tool_calls: list[ToolCallRequest] = []
+        for part in parts:
+            text = _get(part, "text")
+            if text:
+                text_parts.append(str(text))
+            function_call = _get(part, "function_call")
+            if function_call:
+                tool_calls.append(ToolCallRequest(
+                    id=str(_get(function_call, "id") or f"call_{uuid.uuid4().hex}"),
+                    name=str(_get(function_call, "name") or ""),
+                    arguments=_get(function_call, "args", {}) or {},
+                ))
+
+        finish_value = _get(candidate, "finish_reason", "STOP")
+        finish_name = str(getattr(finish_value, "value", finish_value) or "STOP").upper()
+        if tool_calls:
+            finish_reason = "tool_calls"
+        elif finish_name == "MAX_TOKENS":
+            finish_reason = "length"
+        elif finish_name == "STOP":
+            finish_reason = "stop"
+        else:
+            finish_reason = finish_name.lower()
+
+        return LLMResponse(
+            content="".join(text_parts) or None,
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+            usage=cls._extract_usage(response),
+        )
+
+    async def chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        reasoning_effort: str | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+    ) -> LLMResponse:
+        _ = reasoning_effort
+        system_instruction, contents = self._convert_messages(messages)
+        config: dict[str, Any] = {
+            "max_output_tokens": max(1, max_tokens),
+            "temperature": temperature,
+        }
+        if system_instruction:
+            config["system_instruction"] = system_instruction
+        if tools:
+            config["tools"] = self._convert_tools(tools)
+            if tool_config := self._tool_config(tool_choice):
+                config["tool_config"] = tool_config
+
+        try:
+            client = await self._ensure_client()
+            response = await client.aio.models.generate_content(
+                model=self._request_model_name(model or self.default_model),
+                contents=contents,
+                config=config,
+            )
+            return self._parse_response(response)
+        except Exception as exc:
+            return LLMResponse(
+                content=f"Error calling Vertex AI: {exc}",
+                finish_reason="error",
+            )
+
+    def get_default_model(self) -> str:
+        return self.default_model

@@ -193,6 +193,13 @@ class BedrockProviderConfig(ProviderConfig):
     profile: str | None = None  # Optional AWS shared config profile
 
 
+class VertexAIProviderConfig(ProviderConfig):
+    """Google Vertex AI provider configuration."""
+
+    project: str | None = None  # Falls back to GOOGLE_CLOUD_PROJECT
+    location: str | None = None  # Falls back to GOOGLE_CLOUD_LOCATION
+
+
 class ProvidersConfig(Base):
     """Configuration for LLM providers.
 
@@ -220,6 +227,7 @@ class ProvidersConfig(Base):
     lm_studio: ProviderConfig = Field(default_factory=ProviderConfig)  # LM Studio local models
     atomic_chat: ProviderConfig = Field(default_factory=ProviderConfig)  # Atomic Chat local models
     ovms: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenVINO Model Server (OVMS)
+    vertex_ai: VertexAIProviderConfig = Field(default_factory=VertexAIProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
