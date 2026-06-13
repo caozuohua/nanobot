@@ -14,7 +14,7 @@ from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.loader import _SKIP_MODULES, ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.schema import ToolsConfig
-from nanobot.runtime_profile import RuntimeProfile, RuntimeProfileError
+from nanobot.runtime_profile import VPS_LITE_PROFILE, RuntimeProfileError
 
 
 class _MinimalTool(Tool):
@@ -161,7 +161,7 @@ def test_lite_profile_filters_modules_before_import(monkeypatch):
         return original_import(name, package)
 
     monkeypatch.setattr("nanobot.agent.tools.loader.importlib.import_module", guarded_import)
-    loader = ToolLoader(profile=RuntimeProfile.VPS_LITE)
+    loader = ToolLoader(profile=VPS_LITE_PROFILE)
 
     discovered = loader.discover()
     module_names = {cls.__module__.rsplit(".", 1)[-1] for cls in discovered}
@@ -176,7 +176,7 @@ def test_lite_profile_disables_entrypoint_plugins(monkeypatch):
         raise AssertionError("entry_points should not be queried in vps-lite")
 
     monkeypatch.setattr("nanobot.agent.tools.loader.entry_points", fail_entry_points)
-    loader = ToolLoader(profile=RuntimeProfile.VPS_LITE)
+    loader = ToolLoader(profile=VPS_LITE_PROFILE)
 
     assert loader._discover_plugins() == {}
 
@@ -195,7 +195,7 @@ def test_lite_profile_raises_for_configured_excluded_capabilities(
     tools = ToolsConfig()
     mutator(tools)
     ctx = ToolContext(config=tools, workspace="/tmp")
-    loader = ToolLoader(profile=RuntimeProfile.VPS_LITE)
+    loader = ToolLoader(profile=VPS_LITE_PROFILE)
 
     with pytest.raises(RuntimeProfileError, match=expected_fragment):
         loader.load(ctx, registry=ToolRegistry())

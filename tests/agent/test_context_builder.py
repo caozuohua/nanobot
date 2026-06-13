@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.context import ContextBuilder
-from nanobot.runtime_profile import RuntimeProfile
+from nanobot.runtime_profile import VPS_LITE_PROFILE
 from nanobot.session.goal_state import GOAL_STATE_KEY
 
 # ---------------------------------------------------------------------------
@@ -332,7 +332,7 @@ class TestBuildSystemPrompt:
 
         builder = ContextBuilder(
             workspace=tmp_path,
-            profile=RuntimeProfile.VPS_LITE,
+            profile=VPS_LITE_PROFILE,
         )
         prompt = builder.build_system_prompt()
 
