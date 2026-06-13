@@ -198,6 +198,8 @@ def test_vps_lite_wheel_can_load_config_schema(lite_wheel: Path, tmp_path: Path)
                 "from nanobot.config.schema import Config; "
                 "from nanobot.runtime_profile import VPS_LITE_PROFILE; "
                 "c=Config(); c.tools.my.enable=False; "
+                "c.tools.cli_apps.enable=False; "
+                "c.tools.image_generation.enabled=False; "
                 "c.validate_runtime_profile(VPS_LITE_PROFILE)"
             ),
         ],
