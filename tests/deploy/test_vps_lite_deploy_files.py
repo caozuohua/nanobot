@@ -4,10 +4,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEPLOY = ROOT / "deploy"
+DOCS = ROOT / "docs"
 
 
 def read_deploy_file(name: str) -> str:
     return (DEPLOY / name).read_text(encoding="utf-8")
+
+
+def read_doc_file(name: str) -> str:
+    return (DOCS / name).read_text(encoding="utf-8")
 
 
 def test_vps_lite_service_unit_has_expected_runtime_limits() -> None:
@@ -50,6 +55,9 @@ def test_vps_lite_env_example_lists_required_variables_without_secrets() -> None
     text = read_deploy_file("nanobot.env.example")
 
     assert "service account JSON" in text
+    assert "NANOBOT_VERTEX_ENABLED=true" in text
+    assert "default" in text
+    assert "Vertex and AI Studio" in text
     assert "GOOGLE_APPLICATION_CREDENTIALS=" in text
     assert "GOOGLE_CLOUD_PROJECT=" in text
     assert "GOOGLE_CLOUD_LOCATION=" in text
@@ -62,6 +70,38 @@ def test_vps_lite_env_example_lists_required_variables_without_secrets() -> None
     assert "your-token-here" not in text
     assert "sk-" not in text
     assert "xoxb-" not in text
+
+
+def test_vps_lite_docs_define_vertex_gate_and_retirement_contract() -> None:
+    text = read_doc_file("vps-lite.md")
+
+    assert "`NANOBOT_VERTEX_ENABLED=true`" in text
+    assert "default" in text
+    assert "Vertex and AI Studio" in text
+    assert "Invalid values fail" in text
+    assert "no silent fallback" in text
+    assert "`google-genai`" in text
+    assert "global LLM turns are serialized" in text
+    assert "`/goal`" in text
+
+    retirement = text[text.index("## Retire Vertex after credits"):]
+    steps = [
+        "NANOBOT_VERTEX_ENABLED=false",
+        "systemctl restart nanobot.service",
+        "journalctl -u nanobot.service",
+        "`/model`",
+        "Studio",
+        "`studio-35-flash`",
+        "AI Studio call",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "GOOGLE_CLOUD_PROJECT",
+        "GOOGLE_CLOUD_LOCATION",
+        "google-service-account.json",
+    ]
+    positions = [retirement.index(step) for step in steps]
+    assert positions == sorted(positions)
+    assert "only after the AI Studio call succeeds" in retirement
+    assert "NANOBOT_VERTEX_ENABLED=true" in text[text.index("Rollback"):]
 
 
 def test_vps_lite_install_script_is_safe_and_does_not_cut_over() -> None:

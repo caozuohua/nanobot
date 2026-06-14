@@ -5,16 +5,45 @@ Lark WebSocket, Telegram, Discord, Vertex AI, Google AI Studio, OpenAI-compatibl
 providers, remote HTTP/SSE MCP, filesystem/shell/web tools, PKB and managed
 repositories. It does not ship the WebUI or open a public listener.
 
-## Models
+## Models and commands
 
-The fixed catalog contains five Gemini models for both Vertex AI and AI Studio.
-Run `/model` to see the numbered list and `/model 4` or `/model vertex-25-flash`
-to switch globally. The selection is stored under the nanobot workspace and
-survives service restarts.
+The fixed catalog contains five Gemini models from each enabled source.
+`NANOBOT_VERTEX_ENABLED=true` is the current and default mode: `/model` shows
+both Vertex and AI Studio. False-like values (`0`, `false`, `no`, `off`) leave
+AI Studio only. Invalid values fail startup; they are not guessed.
 
-Vertex uses ADC with `GOOGLE_APPLICATION_CREDENTIALS`, `GCP_PROJECT` and
-`GCP_LOCATION`. AI Studio uses `GEMINI_API_KEY`. A failed switch leaves the
-current model unchanged; providers do not silently cross-fallback.
+Use `/model`, `/model <number>`, or `/model <preset>` to inspect or switch the
+global selection. The restored `/goal` command accepts `/goal <goal>` for a
+sustained task. The selection survives restarts. For safety, global LLM turns are serialized.
+This keeps model switching and provider cleanup safe, but one slow turn delays
+other chats.
+
+Vertex uses ADC with `GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_CLOUD_PROJECT`
+and `GOOGLE_CLOUD_LOCATION`. AI Studio uses `GEMINI_API_KEY`. Providers have no silent fallback:
+a failed call or switch stays failed and visible.
+Keep the shared `google-genai` package installed for AI Studio after Vertex is
+disabled.
+
+## Retire Vertex after credits
+
+Do this in order:
+
+1. Set `NANOBOT_VERTEX_ENABLED=false` in `/etc/nanobot/nanobot.env`.
+2. Run `sudo systemctl restart nanobot.service`.
+3. Inspect `journalctl -u nanobot.service -n 100 --no-pager`.
+4. Run `/model`; it should show only Studio presets.
+5. If the saved model was Vertex, confirm it auto-recovers to
+   `studio-35-flash`.
+6. Send a real AI Studio call and confirm the response succeeds.
+7. Remove credentials only after the AI Studio call succeeds:
+   `GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_CLOUD_PROJECT`, then
+   `GOOGLE_CLOUD_LOCATION` from the env file and delete
+   `/etc/nanobot/google-service-account.json`.
+
+Restart once more after removing credentials. Do not uninstall `google-genai`.
+
+Rollback: restore `NANOBOT_VERTEX_ENABLED=true`, restore the three Google
+environment values and service account file, then restart the service.
 
 ## PKB and repositories
 
