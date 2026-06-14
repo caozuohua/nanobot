@@ -781,12 +781,15 @@ def _run_gateway(
         from nanobot.agent.vps_model_catalog import (
             install_vps_model_catalog,
             load_vps_provider_snapshot,
+            validate_vps_model_selection,
         )
 
         install_vps_model_catalog(config)
         selected_preset = load_model_selection(model_selection_path)
+        validate_vps_model_selection(config, selected_preset)
         if selected_preset in config.model_presets:
             config.agents.defaults.model_preset = selected_preset
+        validate_vps_model_selection(config, config.agents.defaults.model_preset)
     port = port if port is not None else config.gateway.port
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")

@@ -129,6 +129,35 @@ def test_gateway_rejects_unsupported_lite_components_before_runtime(
     assert expected in result.stdout
 
 
+@pytest.mark.parametrize("selection_source", ["persisted", "default"])
+def test_vps_lite_gateway_rejects_disabled_vertex_selection_before_provider_construction(
+    monkeypatch,
+    tmp_path: Path,
+    selection_source: str,
+) -> None:
+    config = _lite_config(tmp_path)
+    monkeypatch.setenv("NANOBOT_VERTEX_ENABLED", "false")
+    if selection_source == "persisted":
+        from nanobot.agent.model_selection import save_model_selection
+
+        save_model_selection(
+            config.workspace_path / ".runtime" / "model-selection.json",
+            "vertex-25-flash",
+        )
+    else:
+        config.agents.defaults.model_preset = "vertex-25-flash"
+    monkeypatch.setattr(
+        "nanobot.providers.factory.build_provider_snapshot",
+        lambda *_args, **_kwargs: pytest.fail("provider construction must not be reached"),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Vertex preset 'vertex-25-flash'.*NANOBOT_VERTEX_ENABLED=false",
+    ):
+        commands._run_gateway(config, profile=VPS_LITE_PROFILE)
+
+
 def test_vps_lite_gateway_omits_webui_and_public_listener_and_threads_profile(
     monkeypatch,
     tmp_path: Path,

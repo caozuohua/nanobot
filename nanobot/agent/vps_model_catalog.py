@@ -49,6 +49,14 @@ def install_vps_model_catalog(config: Config) -> None:
     config.model_presets = presets
 
 
+def validate_vps_model_selection(config: Config, preset_name: str | None) -> None:
+    if preset_name and preset_name.startswith("vertex-") and preset_name not in config.model_presets:
+        raise ValueError(
+            f"Vertex preset {preset_name!r} is unavailable because "
+            "NANOBOT_VERTEX_ENABLED=false"
+        )
+
+
 def load_vps_provider_snapshot(
     config_path: Path | None = None,
     *,
