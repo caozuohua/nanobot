@@ -43,6 +43,7 @@ class VertexAIProvider(LLMProvider):
         self._client_lock = asyncio.Lock()
         self._global_client: Any = None
         self._global_client_lock = asyncio.Lock()
+        self._closed = False
 
     @staticmethod
     def _load_sdk() -> Any:
@@ -59,9 +60,11 @@ class VertexAIProvider(LLMProvider):
         return genai
 
     async def _ensure_client(self) -> Any:
+        self._ensure_open()
         if self._client is not None:
             return self._client
         async with self._client_lock:
+            self._ensure_open()
             if self._client is None:
                 sdk = self._load_sdk()
                 self._client = sdk.Client(
@@ -72,11 +75,13 @@ class VertexAIProvider(LLMProvider):
         return self._client
 
     async def _client_for_model(self, model: str) -> Any:
+        self._ensure_open()
         requested = self._request_model_name(model)
         if requested.startswith(("gemini-3.", "gemini-3-")) and self.location != "global":
             if self._global_client is not None:
                 return self._global_client
             async with self._global_client_lock:
+                self._ensure_open()
                 if self._global_client is None:
                     sdk = self._load_sdk()
                     self._global_client = sdk.Client(
@@ -88,21 +93,38 @@ class VertexAIProvider(LLMProvider):
         return await self._ensure_client()
 
     async def aclose(self) -> None:
-        clients = (self._client, self._global_client)
-        self._client = None
-        self._global_client = None
+        self._closed = True
+        async with self._client_lock:
+            client = self._client
+            self._client = None
+        async with self._global_client_lock:
+            global_client = self._global_client
+            self._global_client = None
 
+        first_error: Exception | None = None
         closed: set[int] = set()
-        for client in clients:
-            if client is None or id(client) in closed:
+        for current_client in (client, global_client):
+            if current_client is None or id(current_client) in closed:
                 continue
-            closed.add(id(client))
-            close = getattr(client, "aclose", None) or getattr(client, "close", None)
+            closed.add(id(current_client))
+            close = getattr(current_client, "aclose", None) or getattr(
+                current_client, "close", None
+            )
             if close is None:
                 continue
-            result = close()
-            if inspect.isawaitable(result):
-                await result
+            try:
+                result = close()
+                if inspect.isawaitable(result):
+                    await result
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
+        if first_error is not None:
+            raise first_error
+
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise RuntimeError("Vertex AI provider is closed")
 
     @staticmethod
     def _request_model_name(model: str) -> str:

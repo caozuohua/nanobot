@@ -181,6 +181,69 @@ async def test_aclose_awaits_close_result_and_does_not_double_close_shared_clien
 
 
 @pytest.mark.asyncio
+async def test_aclose_prevents_primary_client_creation_waiting_on_lock(monkeypatch) -> None:
+    import nanobot.providers.vertex_ai_provider as vertex_module
+
+    factory = MagicMock()
+    monkeypatch.setattr(vertex_module, "genai", SimpleNamespace(Client=factory))
+    provider = VertexAIProvider()
+    await provider._client_lock.acquire()
+    ensure_task = asyncio.create_task(provider._ensure_client())
+    await asyncio.sleep(0)
+    close_task = asyncio.create_task(provider.aclose())
+    await asyncio.sleep(0)
+
+    provider._client_lock.release()
+
+    with pytest.raises(RuntimeError, match="closed"):
+        await ensure_task
+    await close_task
+    factory.assert_not_called()
+    assert provider._client is None
+
+
+@pytest.mark.asyncio
+async def test_aclose_prevents_global_client_creation_waiting_on_lock(monkeypatch) -> None:
+    import nanobot.providers.vertex_ai_provider as vertex_module
+
+    factory = MagicMock()
+    monkeypatch.setattr(vertex_module, "genai", SimpleNamespace(Client=factory))
+    provider = VertexAIProvider(location="us-central1")
+    await provider._global_client_lock.acquire()
+    ensure_task = asyncio.create_task(provider._client_for_model("gemini-3-pro"))
+    await asyncio.sleep(0)
+    close_task = asyncio.create_task(provider.aclose())
+    await asyncio.sleep(0)
+
+    provider._global_client_lock.release()
+
+    with pytest.raises(RuntimeError, match="closed"):
+        await ensure_task
+    await close_task
+    factory.assert_not_called()
+    assert provider._global_client is None
+
+
+@pytest.mark.asyncio
+async def test_aclose_attempts_all_clients_before_reraising_first_error() -> None:
+    first_error = RuntimeError("primary close failed")
+    primary = SimpleNamespace(close=MagicMock(side_effect=first_error))
+    global_client = SimpleNamespace(close=MagicMock())
+    provider = VertexAIProvider()
+    provider._client = primary
+    provider._global_client = global_client
+
+    with pytest.raises(RuntimeError, match="primary close failed") as exc_info:
+        await provider.aclose()
+
+    assert exc_info.value is first_error
+    primary.close.assert_called_once_with()
+    global_client.close.assert_called_once_with()
+    assert provider._client is None
+    assert provider._global_client is None
+
+
+@pytest.mark.asyncio
 async def test_chat_returns_function_calls() -> None:
     function_call = SimpleNamespace(
         id="call-123",

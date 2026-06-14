@@ -28,9 +28,11 @@ class GoogleAIProvider(VertexAIProvider):
         return genai
 
     async def _ensure_client(self) -> Any:
+        self._ensure_open()
         if self._client is not None:
             return self._client
         async with self._client_lock:
+            self._ensure_open()
             if self._client is None:
                 if not self.api_key:
                     raise RuntimeError("Google AI Studio requires GEMINI_API_KEY")
