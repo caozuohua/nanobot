@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.vps_model_catalog import install_vps_model_catalog
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command.builtin import (
@@ -137,6 +138,24 @@ async def test_model_command_unknown_preset_keeps_old_state(tmp_path) -> None:
     assert "Available presets: `default`, `fast`" in out.content
     assert loop.model_preset is None
     assert loop.model == "base-model"
+
+
+@pytest.mark.asyncio
+async def test_model_command_omits_disabled_vertex_presets(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("NANOBOT_VERTEX_ENABLED", "false")
+    config = SimpleNamespace(model_presets={})
+    install_vps_model_catalog(config)
+    loop = _make_loop(tmp_path)
+    loop.model_presets = config.model_presets
+
+    out = await cmd_model(_ctx(loop, "/model"))
+    rejected = await cmd_model(_ctx(loop, "/model vertex-35-flash", args="vertex-35-flash"))
+
+    assert "Vertex" not in out.content
+    assert "vertex-" not in out.content
+    assert "`studio-35-flash`" in out.content
+    assert "Could not switch model preset" in rejected.content
+    assert "vertex-35-flash" in rejected.content
 
 
 @pytest.mark.asyncio

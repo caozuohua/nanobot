@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from nanobot.config.schema import Config, ModelPresetConfig
+
+_TRUE_VALUES = {"", "1", "true", "yes", "on"}
+_FALSE_VALUES = {"0", "false", "no", "off"}
 
 MODELS = (
     ("35-flash", "gemini-3.5-flash"),
@@ -15,12 +19,24 @@ MODELS = (
 )
 
 
+def vertex_enabled() -> bool:
+    value = os.getenv("NANOBOT_VERTEX_ENABLED", "").strip().lower()
+    if value in _TRUE_VALUES:
+        return True
+    if value in _FALSE_VALUES:
+        return False
+    raise ValueError(
+        "Invalid NANOBOT_VERTEX_ENABLED value "
+        f"{value!r}; expected one of: 1, true, yes, on, 0, false, no, off"
+    )
+
+
 def install_vps_model_catalog(config: Config) -> None:
     presets: dict[str, ModelPresetConfig] = {}
-    for source, provider, label in (
-        ("vertex", "vertex_ai", "Vertex"),
-        ("studio", "gemini", "AI Studio"),
-    ):
+    sources = [("studio", "gemini", "AI Studio")]
+    if vertex_enabled():
+        sources.insert(0, ("vertex", "vertex_ai", "Vertex"))
+    for source, provider, label in sources:
         for slug, model in MODELS:
             presets[f"{source}-{slug}"] = ModelPresetConfig(
                 label=f"{label} · {model}",
