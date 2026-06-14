@@ -156,3 +156,24 @@ def test_vps_updater_registration_grants_only_exact_command() -> None:
     assert "UPDATE_SUDOERS_SRC=${SCRIPT_DIR}/nanobot-update-sudoers" in installer
     assert "/usr/local/sbin/update-nanobot" in installer
     assert "/etc/sudoers.d/nanobot-update" in installer
+
+
+def test_vps_updater_runs_tests_from_accessible_checkout_and_fails_closed() -> None:
+    text = read_deploy_file("update-vps-lite.sh")
+
+    assert 'cd "${SOURCE_DIR}"' in text
+    assert 'build_and_test "${BUILD_ROOT}"' in text
+    assert "wheel=$(build_and_test" not in text
+    assert 'BUILT_WHEEL="${wheel}"' in text
+    assert 'install_runtime "${BUILT_WHEEL}"' in text
+
+
+def test_vps_updater_cleanup_uses_guarded_global_temp_directory() -> None:
+    text = read_deploy_file("update-vps-lite.sh")
+
+    assert 'BUILD_ROOT=""' in text
+    assert "cleanup() {" in text
+    assert "/var/tmp/nanobot-update.*" in text
+    assert 'rm -rf -- "${BUILD_ROOT}"' in text
+    assert "trap cleanup EXIT" in text
+    assert "trap 'rm -rf" not in text

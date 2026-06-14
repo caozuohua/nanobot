@@ -9,9 +9,20 @@ readonly SERVICE_NAME=nanobot.service
 readonly VENV_PYTHON=/opt/nanobot/.venv/bin/python
 readonly LOCK_FILE=/run/lock/nanobot-update.lock
 
+BUILD_ROOT=""
+BUILT_WHEEL=""
+
 die() {
   printf 'update-nanobot: %s\n' "$*" >&2
   exit 1
+}
+
+cleanup() {
+  case "${BUILD_ROOT}" in
+    /var/tmp/nanobot-update.*)
+      rm -rf -- "${BUILD_ROOT}"
+      ;;
+  esac
 }
 
 run_as_nanobot() {
@@ -76,7 +87,7 @@ build_and_test() {
     "${SOURCE_DIR}/tests/tools/test_external_resources.py" \
     "${SOURCE_DIR}/tests/deploy/test_vps_lite_deploy_files.py" >&2
 
-  printf '%s\n' "${wheel}"
+  BUILT_WHEEL="${wheel}"
 }
 
 install_runtime() {
@@ -118,13 +129,14 @@ main() {
 
   validate_checkout
   update_checkout
+  cd "${SOURCE_DIR}"
 
-  local build_root wheel deployed_commit
-  build_root=$(mktemp -d /var/tmp/nanobot-update.XXXXXX)
-  trap 'rm -rf "${build_root}"' EXIT
-  wheel=$(build_and_test "${build_root}")
+  local deployed_commit
+  BUILD_ROOT=$(mktemp -d /var/tmp/nanobot-update.XXXXXX)
+  trap cleanup EXIT
+  build_and_test "${BUILD_ROOT}"
 
-  install_runtime "${wheel}"
+  install_runtime "${BUILT_WHEEL}"
   restart_and_verify
 
   deployed_commit=$(run_as_nanobot git -C "${SOURCE_DIR}" rev-parse --short HEAD)
