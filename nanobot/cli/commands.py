@@ -577,7 +577,12 @@ def _model_display(config: Config) -> tuple[str, str]:
     return resolved.model, tag
 
 
-def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
+def _load_runtime_config(
+    config: str | None = None,
+    workspace: str | None = None,
+    *,
+    resolve_env: bool = True,
+) -> Config:
     """Load config and optionally override the active workspace."""
     from nanobot.config.loader import load_config, resolve_config_env_vars, set_config_path
 
@@ -591,7 +596,9 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
         console.print(f"[dim]Using config: {config_path}[/dim]")
 
     try:
-        loaded = resolve_config_env_vars(load_config(config_path))
+        loaded = load_config(config_path)
+        if resolve_env:
+            loaded = resolve_config_env_vars(loaded)
     except ValueError as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
@@ -741,7 +748,7 @@ def gateway(
     from nanobot.runtime_profile import RuntimeProfileError, resolve_runtime_profile
 
     try:
-        cfg = _load_runtime_config(config, workspace)
+        cfg = _load_runtime_config(config, workspace, resolve_env=False)
         runtime_profile = resolve_runtime_profile(profile)
         cfg.validate_runtime_profile(runtime_profile)
     except (RuntimeProfileError, ValueError) as exc:
@@ -766,6 +773,7 @@ def _run_gateway(
     from nanobot.bus.queue import MessageBus
     from nanobot.bus.runtime_events import RuntimeEventBus
     from nanobot.channels.manager import ChannelManager
+    from nanobot.config.loader import resolve_config_env_vars
     from nanobot.cron.service import CronJobSkippedError, CronService
     from nanobot.cron.session_turns import is_bound_cron_job
     from nanobot.cron.types import CronJob
@@ -799,6 +807,11 @@ def _run_gateway(
                 f"from {old_preset!r} to {new_preset!r}"
             )
         validate_vps_model_selection(config, config.agents.defaults.model_preset)
+    try:
+        config = resolve_config_env_vars(config)
+    except ValueError as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        raise typer.Exit(1) from exc
     port = port if port is not None else config.gateway.port
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")

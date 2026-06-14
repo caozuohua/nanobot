@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import builtins
+import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -49,7 +50,7 @@ def test_gateway_explicit_profile_overrides_environment(monkeypatch, tmp_path: P
     config = _lite_config(tmp_path)
     seen: list[object] = []
     monkeypatch.setenv("NANOBOT_PROFILE", "vps-lite")
-    monkeypatch.setattr(commands, "_load_runtime_config", lambda *_args: config)
+    monkeypatch.setattr(commands, "_load_runtime_config", lambda *_args, **_kwargs: config)
     monkeypatch.setattr(
         commands,
         "_run_gateway",
@@ -69,7 +70,7 @@ def test_gateway_uses_environment_profile_and_resolves_it_once(
     seen: list[object] = []
     calls: list[str | None] = []
     monkeypatch.setenv("NANOBOT_PROFILE", "vps-lite")
-    monkeypatch.setattr(commands, "_load_runtime_config", lambda *_args: config)
+    monkeypatch.setattr(commands, "_load_runtime_config", lambda *_args, **_kwargs: config)
 
     def _resolve(name: str | None = None):
         calls.append(name)
@@ -121,7 +122,7 @@ def test_gateway_rejects_unsupported_lite_components_before_runtime(
 ) -> None:
     config = _lite_config(tmp_path)
     mutate(config)
-    monkeypatch.setattr(commands, "_load_runtime_config", lambda *_args: config)
+    monkeypatch.setattr(commands, "_load_runtime_config", lambda *_args, **_kwargs: config)
     monkeypatch.setattr(
         commands,
         "_run_gateway",
@@ -186,6 +187,77 @@ def test_vps_lite_gateway_recovers_disabled_vertex_selection_before_provider_con
     assert "studio-35-flash" in warnings[0]
     persisted = load_config(config_file)
     assert persisted.providers.gemini.api_key == "studio-key"
+
+
+def test_vps_lite_gateway_recovery_preserves_env_secret_placeholder(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    config_file = tmp_path / "config.json"
+    workspace = tmp_path / "workspace"
+    secret = "resolved-studio-secret"
+    config_file.write_text(
+        json.dumps(
+            {
+                "agents": {
+                    "defaults": {
+                        "workspace": str(workspace),
+                        "modelPreset": "vertex-25-flash",
+                        "dream": {"enabled": False},
+                    }
+                },
+                "providers": {"gemini": {"apiKey": "${GEMINI_API_KEY}"}},
+                "modelPresets": {
+                    "vertex-25-flash": {
+                        "model": "vertex_ai/gemini-2.5-flash",
+                        "provider": "vertex_ai",
+                    }
+                },
+                "gateway": {"heartbeat": {"enabled": False}},
+                "tools": {
+                    "my": {"enable": False},
+                    "imageGeneration": {"enabled": False},
+                    "cliApps": {"enable": False},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GEMINI_API_KEY", secret)
+    monkeypatch.setenv("NANOBOT_VERTEX_ENABLED", "false")
+
+    def _build_provider(runtime_config, *, profile=None):
+        assert profile is VPS_LITE_PROFILE
+        assert runtime_config.providers.gemini.api_key == secret
+        saved = config_file.read_text(encoding="utf-8")
+        assert "${GEMINI_API_KEY}" in saved
+        assert secret not in saved
+        raise _StopGatewayError("stop")
+
+    monkeypatch.setattr("nanobot.providers.factory.build_provider_snapshot", _build_provider)
+
+    result = runner.invoke(
+        commands.app,
+        ["gateway", "--config", str(config_file), "--profile", "vps-lite"],
+    )
+
+    assert isinstance(result.exception, _StopGatewayError)
+
+
+def test_vps_lite_gateway_reports_missing_env_before_provider_construction(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    config = _lite_config(tmp_path)
+    config.providers.gemini.api_key = "${MISSING_GEMINI_API_KEY}"
+    monkeypatch.delenv("MISSING_GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        "nanobot.providers.factory.build_provider_snapshot",
+        lambda *_args, **_kwargs: pytest.fail("provider construction must not be reached"),
+    )
+
+    with pytest.raises(typer.Exit):
+        commands._run_gateway(config, profile=VPS_LITE_PROFILE)
 
 
 def test_vps_lite_gateway_failed_studio_provider_does_not_try_vertex(
