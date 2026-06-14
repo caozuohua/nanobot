@@ -1398,7 +1398,8 @@ class AgentLoop:
         tools: ToolRegistry | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
-        await self._refresh_provider_snapshot()
+        if not ephemeral:
+            await self._refresh_provider_snapshot()
 
         if msg.channel == "system":
             return await self._process_system_message(
