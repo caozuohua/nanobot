@@ -3,6 +3,7 @@ import pytest
 from nanobot.agent.vps_model_catalog import (
     install_vps_model_catalog,
     load_vps_provider_snapshot,
+    recover_vps_model_selection,
     vertex_enabled,
 )
 from nanobot.config.schema import Config
@@ -71,6 +72,29 @@ def test_vps_catalog_omits_vertex_and_retains_all_studio_presets(monkeypatch) ->
         "studio-25-flash-lite",
     ]
     assert all(preset.provider == "gemini" for preset in config.model_presets.values())
+
+
+def test_vps_selection_recovers_disabled_vertex_to_available_studio(monkeypatch) -> None:
+    monkeypatch.setenv("NANOBOT_VERTEX_ENABLED", "false")
+    config = Config()
+    install_vps_model_catalog(config)
+
+    recovered = recover_vps_model_selection(config, "vertex-25-flash")
+
+    assert recovered == ("vertex-25-flash", "studio-35-flash")
+    assert config.agents.defaults.model_preset == "studio-35-flash"
+    assert "studio-35-flash" in config.model_presets
+
+
+def test_vps_selection_leaves_studio_selection_unchanged(monkeypatch) -> None:
+    monkeypatch.setenv("NANOBOT_VERTEX_ENABLED", "false")
+    config = Config()
+    install_vps_model_catalog(config)
+
+    recovered = recover_vps_model_selection(config, "studio-25-flash")
+
+    assert recovered is None
+    assert config.agents.defaults.model_preset == "studio-25-flash"
 
 
 def test_vps_snapshot_loader_injects_catalog_after_reloading_config(tmp_path, monkeypatch) -> None:

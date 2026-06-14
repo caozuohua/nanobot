@@ -781,14 +781,23 @@ def _run_gateway(
         from nanobot.agent.vps_model_catalog import (
             install_vps_model_catalog,
             load_vps_provider_snapshot,
+            recover_vps_model_selection,
             validate_vps_model_selection,
         )
+        from nanobot.config.loader import save_config
 
         install_vps_model_catalog(config)
         selected_preset = load_model_selection(model_selection_path)
-        validate_vps_model_selection(config, selected_preset)
-        if selected_preset in config.model_presets:
-            config.agents.defaults.model_preset = selected_preset
+        effective_preset = selected_preset or config.agents.defaults.model_preset
+        recovery = recover_vps_model_selection(config, effective_preset)
+        if recovery:
+            old_preset, new_preset = recovery
+            save_config(config)
+            save_model_selection(model_selection_path, new_preset)
+            logger.warning(
+                "VPS Lite recovered disabled Vertex model selection "
+                f"from {old_preset!r} to {new_preset!r}"
+            )
         validate_vps_model_selection(config, config.agents.defaults.model_preset)
     port = port if port is not None else config.gateway.port
 

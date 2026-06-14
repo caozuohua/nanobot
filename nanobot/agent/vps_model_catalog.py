@@ -17,6 +17,7 @@ MODELS = (
     ("25-flash", "gemini-2.5-flash"),
     ("25-flash-lite", "gemini-2.5-flash-lite"),
 )
+DISABLED_VERTEX_RECOVERY_PRESET = "studio-35-flash"
 
 
 def vertex_enabled() -> bool:
@@ -55,6 +56,27 @@ def validate_vps_model_selection(config: Config, preset_name: str | None) -> Non
             f"Vertex preset {preset_name!r} is unavailable because "
             "NANOBOT_VERTEX_ENABLED=false"
         )
+
+
+def recover_vps_model_selection(
+    config: Config,
+    preset_name: str | None,
+) -> tuple[str, str] | None:
+    if (
+        preset_name
+        and preset_name.startswith("vertex-")
+        and preset_name not in config.model_presets
+    ):
+        replacement = DISABLED_VERTEX_RECOVERY_PRESET
+        if replacement not in config.model_presets:
+            raise ValueError(
+                f"Recovery preset {replacement!r} is unavailable in the VPS model catalog"
+            )
+        config.agents.defaults.model_preset = replacement
+        return preset_name, replacement
+    if preset_name in config.model_presets:
+        config.agents.defaults.model_preset = preset_name
+    return None
 
 
 def load_vps_provider_snapshot(

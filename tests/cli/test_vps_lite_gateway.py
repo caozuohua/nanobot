@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 import nanobot.cli.commands as commands
@@ -16,6 +17,10 @@ from nanobot.providers.factory import ProviderSnapshot
 from nanobot.runtime_profile import FULL_PROFILE, VPS_LITE_PROFILE
 
 runner = CliRunner()
+
+
+class _StopGatewayError(RuntimeError):
+    pass
 
 
 def _lite_config(tmp_path: Path) -> Config:
@@ -130,32 +135,81 @@ def test_gateway_rejects_unsupported_lite_components_before_runtime(
 
 
 @pytest.mark.parametrize("selection_source", ["persisted", "default"])
-def test_vps_lite_gateway_rejects_disabled_vertex_selection_before_provider_construction(
+def test_vps_lite_gateway_recovers_disabled_vertex_selection_before_provider_construction(
     monkeypatch,
     tmp_path: Path,
     selection_source: str,
 ) -> None:
+    from nanobot.agent.model_selection import load_model_selection, save_model_selection
+    from nanobot.config.loader import load_config, save_config, set_config_path
+
     config = _lite_config(tmp_path)
+    config_file = tmp_path / "config.json"
+    config.providers.gemini.api_key = "studio-key"
+    config.agents.defaults.model_preset = (
+        "vertex-25-flash" if selection_source == "default" else "studio-25-flash"
+    )
+    save_config(config, config_file)
+    set_config_path(config_file)
     monkeypatch.setenv("NANOBOT_VERTEX_ENABLED", "false")
     if selection_source == "persisted":
-        from nanobot.agent.model_selection import save_model_selection
-
         save_model_selection(
             config.workspace_path / ".runtime" / "model-selection.json",
             "vertex-25-flash",
         )
-    else:
-        config.agents.defaults.model_preset = "vertex-25-flash"
-    monkeypatch.setattr(
-        "nanobot.providers.factory.build_provider_snapshot",
-        lambda *_args, **_kwargs: pytest.fail("provider construction must not be reached"),
-    )
+    warnings: list[str] = []
 
-    with pytest.raises(
-        ValueError,
-        match="Vertex preset 'vertex-25-flash'.*NANOBOT_VERTEX_ENABLED=false",
-    ):
+    def _build_provider(recovered, *, profile=None):
+        assert profile is VPS_LITE_PROFILE
+        assert recovered.agents.defaults.model_preset == "studio-35-flash"
+        assert load_config(config_file).agents.defaults.model_preset == "studio-35-flash"
+        assert load_model_selection(
+            config.workspace_path / ".runtime" / "model-selection.json"
+        ) == "studio-35-flash"
+        assert set(recovered.model_presets) == {
+            "studio-35-flash",
+            "studio-31-flash-lite",
+            "studio-25-pro",
+            "studio-25-flash",
+            "studio-25-flash-lite",
+        }
+        raise _StopGatewayError("stop")
+
+    monkeypatch.setattr("nanobot.providers.factory.build_provider_snapshot", _build_provider)
+    monkeypatch.setattr(commands.logger, "warning", lambda message: warnings.append(message))
+
+    with pytest.raises(_StopGatewayError):
         commands._run_gateway(config, profile=VPS_LITE_PROFILE)
+
+    assert len(warnings) == 1
+    assert "vertex-25-flash" in warnings[0]
+    assert "studio-35-flash" in warnings[0]
+    persisted = load_config(config_file)
+    assert persisted.providers.gemini.api_key == "studio-key"
+
+
+def test_vps_lite_gateway_failed_studio_provider_does_not_try_vertex(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from nanobot.config.loader import set_config_path
+
+    config = _lite_config(tmp_path)
+    config.agents.defaults.model_preset = "vertex-25-flash"
+    set_config_path(tmp_path / "config.json")
+    monkeypatch.setenv("NANOBOT_VERTEX_ENABLED", "false")
+    attempts: list[str | None] = []
+
+    def _build_provider(recovered, *, profile=None):
+        attempts.append(recovered.resolve_preset().provider)
+        raise ValueError("AI Studio credentials invalid")
+
+    monkeypatch.setattr("nanobot.providers.factory.build_provider_snapshot", _build_provider)
+
+    with pytest.raises(typer.Exit):
+        commands._run_gateway(config, profile=VPS_LITE_PROFILE)
+
+    assert attempts == ["gemini"]
 
 
 def test_vps_lite_gateway_omits_webui_and_public_listener_and_threads_profile(
