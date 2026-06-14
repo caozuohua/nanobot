@@ -17,6 +17,8 @@ readonly ENV_SRC=${SCRIPT_DIR}/nanobot.env.example
 readonly REPO_WRAPPER_SRC=${SCRIPT_DIR}/nanobot-repo
 readonly PACKAGE_WRAPPER_SRC=${SCRIPT_DIR}/nanobot-package
 readonly SUDOERS_SRC=${SCRIPT_DIR}/nanobot-sudoers
+readonly UPDATE_SRC=${SCRIPT_DIR}/update-vps-lite.sh
+readonly UPDATE_SUDOERS_SRC=${SCRIPT_DIR}/nanobot-update-sudoers
 readonly UNIT_DST=/etc/systemd/system/${SERVICE_NAME}.service
 readonly ENV_DST=${ETC_DIR}/nanobot.env
 
@@ -84,9 +86,14 @@ install_unit() {
 install_privileged_assets() {
   install -o root -g root -m 0755 "${REPO_WRAPPER_SRC}" /usr/local/sbin/nanobot-repo
   install -o root -g root -m 0755 "${PACKAGE_WRAPPER_SRC}" /usr/local/sbin/nanobot-package
+  install -o root -g root -m 0755 "${UPDATE_SRC}" /usr/local/sbin/update-nanobot
   visudo -cf "${SUDOERS_SRC}"
   install -o root -g root -m 0440 "${SUDOERS_SRC}" /etc/sudoers.d/nanobot
+  visudo -cf "${UPDATE_SUDOERS_SRC}"
+  install -o root -g root -m 0440 \
+    "${UPDATE_SUDOERS_SRC}" /etc/sudoers.d/nanobot-update
   visudo -cf /etc/sudoers.d/nanobot
+  visudo -cf /etc/sudoers.d/nanobot-update
   rm -f /etc/sudoers.d/bot
   if [[ -x /usr/bin/fdfind && ! -e /usr/local/bin/fd ]]; then
     ln -s /usr/bin/fdfind /usr/local/bin/fd

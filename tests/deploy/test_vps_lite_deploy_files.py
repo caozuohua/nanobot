@@ -110,3 +110,49 @@ def test_vps_lite_service_keeps_capabilities_required_by_sudo_wrapper() -> None:
 
     assert "NoNewPrivileges=no" in unit
     assert "CapabilityBoundingSet=" not in unit
+
+
+def test_vps_updater_is_fixed_safe_and_validates_before_install() -> None:
+    text = read_deploy_file("update-vps-lite.sh")
+
+    assert text.startswith("#!/usr/bin/env bash")
+    assert "set -euo pipefail" in text
+    assert "SOURCE_DIR=/opt/workspace/nanobot/nanobot_repo" in text
+    assert "APPROVED_REMOTE=git@github.com:caozuohua/nanobot.git" in text
+    assert "APPROVED_BRANCH=codex/vps-lite" in text
+    assert "flock -n" in text
+    assert "status --porcelain" in text
+    assert 'fetch origin "${APPROVED_BRANCH}"' in text
+    assert "merge-base --is-ancestor" in text
+    assert "merge --ff-only" in text
+    assert "NANOBOT_BUILD_PROFILE=vps-lite" in text
+    assert "tests/build/test_vps_lite_artifact.py" in text
+    assert "tests/providers/test_vertex_ai_provider.py" in text
+    assert "tests/tools/test_external_resources.py" in text
+    assert "tests/deploy/test_vps_lite_deploy_files.py" in text
+    assert "pip install --no-deps --force-reinstall" in text
+    assert 'systemctl restart "${SERVICE_NAME}"' in text
+    assert 'systemctl is-active --quiet "${SERVICE_NAME}"' in text
+    assert 'systemctl is-enabled --quiet "${SERVICE_NAME}"' in text
+    assert "luck-agent.service" in text
+    assert "reset --hard" not in text
+    assert "push --force" not in text
+    assert "git clean" not in text
+
+
+def test_vps_updater_registration_grants_only_exact_command() -> None:
+    updater = read_deploy_file("update-vps-lite.sh")
+    sudoers = read_deploy_file("nanobot-update-sudoers")
+    installer = read_deploy_file("install-vps-lite.sh")
+
+    assert '[[ $# -eq 0 ]]' in updater
+    assert (
+        "caozuohua99 ALL=(root) NOPASSWD: /usr/local/sbin/update-nanobot"
+        in sudoers
+    )
+    assert "caozuohua99 ALL=(ALL)" not in sudoers
+    assert "update-nanobot *" not in sudoers
+    assert "UPDATE_SRC=${SCRIPT_DIR}/update-vps-lite.sh" in installer
+    assert "UPDATE_SUDOERS_SRC=${SCRIPT_DIR}/nanobot-update-sudoers" in installer
+    assert "/usr/local/sbin/update-nanobot" in installer
+    assert "/etc/sudoers.d/nanobot-update" in installer

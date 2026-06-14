@@ -55,3 +55,28 @@ Rollback keeps all luck-agent files and credentials:
 sudo systemctl disable --now nanobot.service
 sudo systemctl enable --now luck-agent.service
 ```
+
+## Updating From GitHub On The VPS
+
+The registered updater follows only `origin/codex/vps-lite` from
+`/opt/workspace/nanobot/nanobot_repo`. After pushing Windows development
+changes to GitHub, log in as `caozuohua99` and run:
+
+```bash
+sudo -n /usr/local/sbin/update-nanobot
+```
+
+The updater refuses arguments, a dirty worktree, an unexpected remote or
+branch, and divergent history. It fetches and fast-forwards the fixed branch,
+builds a Lite wheel in a temporary directory, runs artifact/provider/tool/deploy
+tests, installs only the verified wheel, refreshes repository-managed privileged
+assets and the systemd unit, then restarts nanobot.
+
+Build or test failures leave the installed runtime and running service
+unchanged. Check the source checkout before retrying:
+
+```bash
+sudo -u nanobot git -C /opt/workspace/nanobot/nanobot_repo status --short --branch
+sudo -u nanobot git -C /opt/workspace/nanobot/nanobot_repo remote -v
+journalctl -u nanobot.service -n 100 --no-pager
+```
