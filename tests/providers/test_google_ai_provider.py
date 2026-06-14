@@ -1,3 +1,6 @@
+import os
+import subprocess
+import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -6,6 +9,24 @@ import pytest
 from nanobot.config.schema import Config
 from nanobot.providers.factory import make_provider
 from nanobot.providers.google_ai_provider import GoogleAIProvider
+
+
+def test_google_ai_module_does_not_import_sdk() -> None:
+    script = (
+        "import builtins\n"
+        "original_import = builtins.__import__\n"
+        "def guarded_import(name, *args, **kwargs):\n"
+        "    if name == 'google': raise RuntimeError('eager Google SDK import')\n"
+        "    return original_import(name, *args, **kwargs)\n"
+        "builtins.__import__ = guarded_import\n"
+        "import nanobot.providers.google_ai_provider"
+    )
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(
+        filter(None, [os.getcwd(), env.get("PYTHONPATH")])
+    )
+
+    subprocess.run([sys.executable, "-c", script], check=True, env=env)
 
 
 @pytest.mark.asyncio

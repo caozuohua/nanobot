@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -120,6 +121,63 @@ async def test_vertex_3x_models_use_global_location(monkeypatch) -> None:
         project="demo-project",
         location="global",
     )
+
+
+@pytest.mark.asyncio
+async def test_vertex_3x_models_reuse_global_client(monkeypatch) -> None:
+    import nanobot.providers.vertex_ai_provider as vertex_module
+
+    global_client = SimpleNamespace(aio=SimpleNamespace(models=SimpleNamespace()))
+    factory = MagicMock(return_value=global_client)
+    monkeypatch.setattr(vertex_module, "genai", SimpleNamespace(Client=factory))
+    provider = VertexAIProvider(project="demo-project", location="us-central1")
+
+    first = await provider._client_for_model("gemini-3.1-flash-lite")
+    second = await provider._client_for_model("vertex_ai/gemini-3-pro")
+
+    assert first is global_client
+    assert second is global_client
+    factory.assert_called_once_with(
+        vertexai=True,
+        project="demo-project",
+        location="global",
+    )
+
+
+@pytest.mark.asyncio
+async def test_aclose_closes_and_clears_primary_and_global_clients() -> None:
+    primary = SimpleNamespace(close=MagicMock())
+    global_client = SimpleNamespace(aclose=AsyncMock())
+    provider = VertexAIProvider()
+    provider._client = primary
+    provider._global_client = global_client
+
+    await provider.aclose()
+
+    primary.close.assert_called_once_with()
+    global_client.aclose.assert_awaited_once_with()
+    assert provider._client is None
+    assert provider._global_client is None
+
+
+@pytest.mark.asyncio
+async def test_aclose_awaits_close_result_and_does_not_double_close_shared_client() -> None:
+    closed = False
+
+    async def finish_close() -> None:
+        nonlocal closed
+        await asyncio.sleep(0)
+        closed = True
+
+    shared = SimpleNamespace(close=MagicMock(side_effect=finish_close))
+    provider = VertexAIProvider()
+    provider._client = shared
+    provider._global_client = shared
+
+    await provider.aclose()
+
+    shared.close.assert_called_once_with()
+    assert closed is True
 
 
 @pytest.mark.asyncio

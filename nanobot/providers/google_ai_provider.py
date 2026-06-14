@@ -7,10 +7,7 @@ from typing import Any
 
 from nanobot.providers.vertex_ai_provider import VertexAIProvider
 
-try:
-    from google import genai
-except ImportError:
-    genai = None
+genai: Any = None
 
 
 class GoogleAIProvider(VertexAIProvider):

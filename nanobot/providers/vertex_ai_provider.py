@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import inspect
 import json
 import uuid
 from typing import Any
@@ -40,6 +41,8 @@ class VertexAIProvider(LLMProvider):
         self.default_model = default_model
         self._client: Any = None
         self._client_lock = asyncio.Lock()
+        self._global_client: Any = None
+        self._global_client_lock = asyncio.Lock()
 
     @staticmethod
     def _load_sdk() -> Any:
@@ -71,13 +74,35 @@ class VertexAIProvider(LLMProvider):
     async def _client_for_model(self, model: str) -> Any:
         requested = self._request_model_name(model)
         if requested.startswith(("gemini-3.", "gemini-3-")) and self.location != "global":
-            sdk = self._load_sdk()
-            return sdk.Client(
-                vertexai=True,
-                project=self.project,
-                location="global",
-            )
+            if self._global_client is not None:
+                return self._global_client
+            async with self._global_client_lock:
+                if self._global_client is None:
+                    sdk = self._load_sdk()
+                    self._global_client = sdk.Client(
+                        vertexai=True,
+                        project=self.project,
+                        location="global",
+                    )
+            return self._global_client
         return await self._ensure_client()
+
+    async def aclose(self) -> None:
+        clients = (self._client, self._global_client)
+        self._client = None
+        self._global_client = None
+
+        closed: set[int] = set()
+        for client in clients:
+            if client is None or id(client) in closed:
+                continue
+            closed.add(id(client))
+            close = getattr(client, "aclose", None) or getattr(client, "close", None)
+            if close is None:
+                continue
+            result = close()
+            if inspect.isawaitable(result):
+                await result
 
     @staticmethod
     def _request_model_name(model: str) -> str:
