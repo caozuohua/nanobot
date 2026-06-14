@@ -597,10 +597,13 @@ def _load_runtime_config(
         console.print(f"[dim]Using config: {config_path}[/dim]")
 
     try:
-        loaded = load_config(
-            config_path,
-            defer_model_preset_validation=defer_model_preset_validation,
-        )
+        if defer_model_preset_validation:
+            loaded = load_config(
+                config_path,
+                defer_model_preset_validation=True,
+            )
+        else:
+            loaded = load_config(config_path)
         if resolve_env:
             loaded = resolve_config_env_vars(loaded)
     except ValueError as e:
@@ -752,13 +755,13 @@ def gateway(
     from nanobot.runtime_profile import RuntimeProfileError, resolve_runtime_profile
 
     try:
+        runtime_profile = resolve_runtime_profile(profile)
         cfg = _load_runtime_config(
             config,
             workspace,
             resolve_env=False,
-            defer_model_preset_validation=True,
+            defer_model_preset_validation=runtime_profile.is_lite,
         )
-        runtime_profile = resolve_runtime_profile(profile)
         validation_selection = None
         if runtime_profile.is_lite:
             from nanobot.agent.vps_model_catalog import (
