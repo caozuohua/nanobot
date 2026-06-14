@@ -199,6 +199,50 @@ def test_tool_history_replays_function_call_without_synthetic_text() -> None:
     assert contents[1]["parts"][0]["function_response"]["name"] == "read_file"
 
 
+def test_parallel_tool_results_are_grouped_into_one_function_response_turn() -> None:
+    _, contents = VertexAIProvider._convert_messages([
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call-pkb",
+                    "type": "function",
+                    "function": {"name": "pkb", "arguments": '{"action":"list"}'},
+                },
+                {
+                    "id": "call-blog",
+                    "type": "function",
+                    "function": {
+                        "name": "managed_repo",
+                        "arguments": '{"action":"status","repository":"blog"}',
+                    },
+                },
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-pkb",
+            "name": "pkb",
+            "content": '{"items":[]}',
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call-blog",
+            "name": "managed_repo",
+            "content": "## main...origin/main",
+        },
+    ])
+
+    assert len(contents) == 2
+    assert contents[1]["role"] == "user"
+    responses = contents[1]["parts"]
+    assert [part["function_response"]["name"] for part in responses] == [
+        "pkb",
+        "managed_repo",
+    ]
+
+
 def test_parse_and_replay_preserves_thought_signature() -> None:
     signature = b"opaque-thought-signature"
     function_call = SimpleNamespace(

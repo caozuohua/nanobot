@@ -138,10 +138,18 @@ class VertexAIProvider(LLMProvider):
                 else:
                     parsed = raw_content
                 response = parsed if isinstance(parsed, dict) else {"result": parsed}
-                contents.append({
-                    "role": "user",
-                    "parts": [{"function_response": {"name": name, "response": response}}],
-                })
+                part = {"function_response": {"name": name, "response": response}}
+                if (
+                    contents
+                    and contents[-1]["role"] == "user"
+                    and all("function_response" in item for item in contents[-1]["parts"])
+                ):
+                    contents[-1]["parts"].append(part)
+                else:
+                    contents.append({
+                        "role": "user",
+                        "parts": [part],
+                    })
                 continue
 
             tool_calls = message.get("tool_calls") or []
