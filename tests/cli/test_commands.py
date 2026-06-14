@@ -849,6 +849,7 @@ def mock_agent_runtime(tmp_path):
         agent_loop.process_direct = AsyncMock(
             return_value=OutboundMessage(channel="cli", chat_id="direct", content="mock-response"),
         )
+        agent_loop.run = AsyncMock(return_value=None)
         agent_loop.close_mcp = AsyncMock(return_value=None)
         agent_loop.stop = AsyncMock(return_value=None)
         mock_from_config.return_value = agent_loop
@@ -885,11 +886,28 @@ def test_agent_uses_default_config_when_no_workspace_or_config_flags(mock_agent_
     passed_config = mock_agent_runtime["from_config"].call_args.args[0]
     assert passed_config.workspace_path == mock_agent_runtime["config"].workspace_path
     mock_agent_runtime["agent_loop"].process_direct.assert_awaited_once()
-    mock_agent_runtime["agent_loop"].close_mcp.assert_awaited_once_with()
+    mock_agent_runtime["agent_loop"].close_mcp.assert_not_awaited()
     mock_agent_runtime["agent_loop"].stop.assert_awaited_once_with()
     mock_agent_runtime["print_response"].assert_called_once_with(
         "mock-response", render_markdown=True, metadata={},
     )
+
+
+def test_interactive_agent_exit_stops_loop_without_direct_mcp_cleanup(
+    mock_agent_runtime,
+    monkeypatch,
+):
+    monkeypatch.setattr("nanobot.cli.commands._init_prompt_session", lambda: None)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._read_interactive_input_async",
+        AsyncMock(return_value="exit"),
+    )
+
+    result = runner.invoke(app, ["agent"])
+
+    assert result.exit_code == 0
+    mock_agent_runtime["agent_loop"].close_mcp.assert_not_awaited()
+    mock_agent_runtime["agent_loop"].stop.assert_awaited_once_with()
 
 
 def test_agent_uses_explicit_config_path(mock_agent_runtime, tmp_path: Path):
@@ -2004,7 +2022,7 @@ def test_serve_uses_api_config_defaults_and_workspace_override(
     assert seen["host"] == "127.0.0.2"
     assert seen["port"] == 18900
     assert seen["request_timeout"] == 45.0
-    assert seen["close_mcp_calls"] == 1
+    assert seen.get("close_mcp_calls", 0) == 0
     assert seen["stop_calls"] == 1
 
 

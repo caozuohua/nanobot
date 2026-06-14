@@ -534,12 +534,17 @@ class AgentLoop:
         publish_update: bool = True,
         model_preset: str | None = None,
     ) -> None:
-        async with self._llm_turn_gate.hold():
-            await self._replace_provider_snapshot_locked(
-                snapshot,
-                publish_update=publish_update,
-                model_preset=model_preset,
-            )
+        try:
+            async with self._llm_turn_gate.hold():
+                await self._replace_provider_snapshot_locked(
+                    snapshot,
+                    publish_update=publish_update,
+                    model_preset=model_preset,
+                )
+        except BaseException:
+            if snapshot.provider is not self.provider:
+                await self._close_provider_once(snapshot.provider, description="candidate")
+            raise
 
     async def _replace_provider_snapshot_locked(
         self,
@@ -1255,8 +1260,13 @@ class AgentLoop:
     async def stop(self) -> None:
         """Stop the agent loop."""
         self._running = False
-        async with self._llm_turn_gate.hold():
-            await self._close_provider_once(self.provider, description="active")
+        try:
+            await self.close_mcp()
+        except Exception:
+            logger.exception("Failed to close MCP resources during shutdown")
+        finally:
+            async with self._llm_turn_gate.hold():
+                await self._close_provider_once(self.provider, description="active")
         logger.info("Agent loop stopping")
 
     async def _process_system_message(

@@ -103,7 +103,6 @@ class Nanobot:
 
     async def aclose(self) -> None:
         """Release resources held by this instance (MCP connections, etc.)."""
-        await self._loop.close_mcp()
         await self._loop.stop()
 
     async def __aenter__(self) -> Nanobot:

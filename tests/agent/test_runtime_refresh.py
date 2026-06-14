@@ -388,6 +388,49 @@ async def test_model_switch_waits_for_active_turn_before_closing_old_provider(
     old_provider.aclose.assert_awaited_once_with()
 
 
+@pytest.mark.asyncio
+async def test_cancelled_model_switch_closes_waiting_candidate_and_preserves_cancel(
+    tmp_path: Path,
+) -> None:
+    old_provider = _provider("old-model")
+    candidate_provider = _provider("new-model")
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=old_provider,
+        workspace=tmp_path,
+        model_presets={"fast": Config().resolve_default_preset()},
+        preset_snapshot_loader=lambda _name: ProviderSnapshot(
+            provider=candidate_provider,
+            model="new-model",
+            context_window_tokens=2000,
+            signature=("new-model",),
+        ),
+    )
+
+    async with loop._llm_turn_gate.hold():
+        switch = asyncio.create_task(loop.set_model_preset("fast"))
+        await asyncio.sleep(0)
+        switch.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await switch
+
+    assert loop.provider is old_provider
+    old_provider.aclose.assert_not_awaited()
+    candidate_provider.aclose.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_stop_closes_provider_when_mcp_cleanup_raises(tmp_path: Path) -> None:
+    provider = _provider("model")
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path)
+    loop.close_mcp = AsyncMock(side_effect=RuntimeError("mcp cleanup failed"))
+
+    await loop.stop()
+
+    loop.close_mcp.assert_awaited_once_with()
+    provider.aclose.assert_awaited_once_with()
+
+
 def test_sync_model_preset_setter_rejects_before_constructing_candidate(tmp_path: Path) -> None:
     loader = MagicMock()
     loop = AgentLoop(

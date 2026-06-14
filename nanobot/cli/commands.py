@@ -702,7 +702,6 @@ def serve(
         await agent_loop._connect_mcp()
 
     async def on_cleanup(_app):
-        await agent_loop.close_mcp()
         await agent_loop.stop()
 
     api_app.on_startup.append(on_startup)
@@ -1290,9 +1289,8 @@ def _run_gateway(
             console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
             console.print(traceback.format_exc())
         finally:
-            await agent.close_mcp()
-            cron.stop()
             await agent.stop()
+            cron.stop()
             await channels.stop_all()
             # Flush all cached sessions to durable storage before exit.
             # This prevents data loss on filesystems with write-back
@@ -1417,7 +1415,6 @@ def agent(
                         **print_kwargs,
                     )
             finally:
-                await agent_loop.close_mcp()
                 await agent_loop.stop()
 
         asyncio.run(run_once())
@@ -1567,7 +1564,6 @@ def agent(
                 await agent_loop.stop()
                 outbound_task.cancel()
                 await asyncio.gather(bus_task, outbound_task, return_exceptions=True)
-                await agent_loop.close_mcp()
 
         asyncio.run(run_interactive())
 

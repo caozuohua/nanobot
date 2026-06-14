@@ -337,7 +337,7 @@ async def test_aclose_delegates_to_full_loop_cleanup_once(tmp_path):
 
     await bot.aclose()
 
-    bot._loop.close_mcp.assert_awaited_once()
+    bot._loop.close_mcp.assert_not_awaited()
     bot._loop.stop.assert_awaited_once()
 
 
@@ -351,7 +351,7 @@ async def test_context_manager_calls_aclose_on_exit(tmp_path):
     async with bot as b:
         assert b is bot
 
-    bot._loop.close_mcp.assert_awaited_once()
+    bot._loop.close_mcp.assert_not_awaited()
     bot._loop.stop.assert_awaited_once()
 
 
@@ -367,5 +367,5 @@ async def test_context_manager_does_not_swallow_exceptions(tmp_path):
             assert b is bot
             raise ValueError("boom")
 
-    bot._loop.close_mcp.assert_awaited_once()
+    bot._loop.close_mcp.assert_not_awaited()
     bot._loop.stop.assert_awaited_once()
