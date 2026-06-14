@@ -87,6 +87,8 @@ def load_vps_provider_snapshot(
     from nanobot.config.loader import load_config, resolve_config_env_vars
     from nanobot.providers.factory import build_provider_snapshot
 
-    config = resolve_config_env_vars(load_config(config_path))
+    config = resolve_config_env_vars(
+        load_config(config_path, defer_model_preset_validation=True)
+    )
     install_vps_model_catalog(config)
     return build_provider_snapshot(config, preset_name=preset_name, profile="vps-lite")

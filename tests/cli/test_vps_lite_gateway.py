@@ -142,7 +142,7 @@ def test_vps_lite_gateway_recovers_disabled_vertex_selection_before_provider_con
     selection_source: str,
 ) -> None:
     from nanobot.agent.model_selection import load_model_selection, save_model_selection
-    from nanobot.config.loader import load_config, save_config, set_config_path
+    from nanobot.config.loader import save_config, set_config_path
 
     config = _lite_config(tmp_path)
     config_file = tmp_path / "config.json"
@@ -163,7 +163,8 @@ def test_vps_lite_gateway_recovers_disabled_vertex_selection_before_provider_con
     def _build_provider(recovered, *, profile=None):
         assert profile is VPS_LITE_PROFILE
         assert recovered.agents.defaults.model_preset == "studio-35-flash"
-        assert load_config(config_file).agents.defaults.model_preset == "studio-35-flash"
+        persisted = json.loads(config_file.read_text(encoding="utf-8"))
+        assert persisted["agents"]["defaults"]["modelPreset"] == "studio-35-flash"
         assert load_model_selection(
             config.workspace_path / ".runtime" / "model-selection.json"
         ) == "studio-35-flash"
@@ -185,8 +186,8 @@ def test_vps_lite_gateway_recovers_disabled_vertex_selection_before_provider_con
     assert len(warnings) == 1
     assert "vertex-25-flash" in warnings[0]
     assert "studio-35-flash" in warnings[0]
-    persisted = load_config(config_file)
-    assert persisted.providers.gemini.api_key == "studio-key"
+    persisted = json.loads(config_file.read_text(encoding="utf-8"))
+    assert persisted["providers"]["gemini"]["apiKey"] == "studio-key"
 
 
 def test_vps_lite_gateway_recovery_preserves_env_secret_placeholder(
@@ -211,8 +212,14 @@ def test_vps_lite_gateway_recovery_preserves_env_secret_placeholder(
                     "vertex-25-flash": {
                         "model": "vertex_ai/gemini-2.5-flash",
                         "provider": "vertex_ai",
-                    }
+                    },
+                    "custom-local": {
+                        "model": "openai/custom-model",
+                        "provider": "openai",
+                        "temperature": 0.42,
+                    },
                 },
+                "channels": {"unknownSentinel": {"keep": ["exactly", 7]}},
                 "gateway": {"heartbeat": {"enabled": False}},
                 "tools": {
                     "my": {"enable": False},
@@ -229,9 +236,24 @@ def test_vps_lite_gateway_recovery_preserves_env_secret_placeholder(
     def _build_provider(runtime_config, *, profile=None):
         assert profile is VPS_LITE_PROFILE
         assert runtime_config.providers.gemini.api_key == secret
-        saved = config_file.read_text(encoding="utf-8")
-        assert "${GEMINI_API_KEY}" in saved
-        assert secret not in saved
+        saved_text = config_file.read_text(encoding="utf-8")
+        saved = json.loads(saved_text)
+        assert saved["agents"]["defaults"]["modelPreset"] == "studio-35-flash"
+        assert saved["providers"]["gemini"]["apiKey"] == "${GEMINI_API_KEY}"
+        assert secret not in saved_text
+        assert saved["channels"]["unknownSentinel"] == {"keep": ["exactly", 7]}
+        assert saved["modelPresets"] == {
+            "vertex-25-flash": {
+                "model": "vertex_ai/gemini-2.5-flash",
+                "provider": "vertex_ai",
+            },
+            "custom-local": {
+                "model": "openai/custom-model",
+                "provider": "openai",
+                "temperature": 0.42,
+            },
+        }
+        assert "studio-35-flash" not in saved["modelPresets"]
         raise _StopGatewayError("stop")
 
     monkeypatch.setattr("nanobot.providers.factory.build_provider_snapshot", _build_provider)
@@ -242,6 +264,11 @@ def test_vps_lite_gateway_recovery_preserves_env_secret_placeholder(
     )
 
     assert isinstance(result.exception, _StopGatewayError)
+    restarted = runner.invoke(
+        commands.app,
+        ["gateway", "--config", str(config_file), "--profile", "vps-lite"],
+    )
+    assert isinstance(restarted.exception, _StopGatewayError)
 
 
 def test_vps_lite_gateway_reports_missing_env_before_provider_construction(

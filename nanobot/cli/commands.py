@@ -582,6 +582,7 @@ def _load_runtime_config(
     workspace: str | None = None,
     *,
     resolve_env: bool = True,
+    defer_model_preset_validation: bool = False,
 ) -> Config:
     """Load config and optionally override the active workspace."""
     from nanobot.config.loader import load_config, resolve_config_env_vars, set_config_path
@@ -596,7 +597,10 @@ def _load_runtime_config(
         console.print(f"[dim]Using config: {config_path}[/dim]")
 
     try:
-        loaded = load_config(config_path)
+        loaded = load_config(
+            config_path,
+            defer_model_preset_validation=defer_model_preset_validation,
+        )
         if resolve_env:
             loaded = resolve_config_env_vars(loaded)
     except ValueError as e:
@@ -748,9 +752,26 @@ def gateway(
     from nanobot.runtime_profile import RuntimeProfileError, resolve_runtime_profile
 
     try:
-        cfg = _load_runtime_config(config, workspace, resolve_env=False)
+        cfg = _load_runtime_config(
+            config,
+            workspace,
+            resolve_env=False,
+            defer_model_preset_validation=True,
+        )
         runtime_profile = resolve_runtime_profile(profile)
+        validation_selection = None
+        if runtime_profile.is_lite:
+            from nanobot.agent.vps_model_catalog import (
+                install_vps_model_catalog,
+                recover_vps_model_selection,
+            )
+
+            install_vps_model_catalog(cfg)
+            validation_selection = cfg.agents.defaults.model_preset
+            recover_vps_model_selection(cfg, validation_selection)
         cfg.validate_runtime_profile(runtime_profile)
+        if validation_selection is not None:
+            cfg.agents.defaults.model_preset = validation_selection
     except (RuntimeProfileError, ValueError) as exc:
         console.print(f"[red]Error: {exc}[/red]")
         raise typer.Exit(1) from exc
@@ -792,7 +813,7 @@ def _run_gateway(
             recover_vps_model_selection,
             validate_vps_model_selection,
         )
-        from nanobot.config.loader import save_config
+        from nanobot.config.loader import update_config_model_preset
 
         install_vps_model_catalog(config)
         selected_preset = load_model_selection(model_selection_path)
@@ -800,7 +821,7 @@ def _run_gateway(
         recovery = recover_vps_model_selection(config, effective_preset)
         if recovery:
             old_preset, new_preset = recovery
-            save_config(config)
+            update_config_model_preset(new_preset)
             save_model_selection(model_selection_path, new_preset)
             logger.warning(
                 "VPS Lite recovered disabled Vertex model selection "
