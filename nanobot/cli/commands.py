@@ -1094,6 +1094,7 @@ def _run_gateway(
             should_notify = await evaluate_response(
                 response, prompt, agent.provider, agent.model,
                 default_notify=False,
+                llm_turn_gate=agent._llm_turn_gate,
             )
             if should_notify:
                 logger.info("Heartbeat: completed, delivering response")

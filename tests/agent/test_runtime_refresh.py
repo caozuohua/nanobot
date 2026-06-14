@@ -113,7 +113,7 @@ async def test_model_preset_cleanup_error_does_not_undo_successful_switch(
 
 
 @pytest.mark.asyncio
-async def test_stop_closes_active_provider_once_and_ignores_cleanup_errors(
+async def test_stop_retries_active_provider_close_after_cleanup_errors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -127,8 +127,9 @@ async def test_stop_closes_active_provider_once_and_ignores_cleanup_errors(
     await loop.stop()
 
     assert loop._running is False
-    provider.aclose.assert_awaited_once_with()
-    log_exception.assert_called_once_with("Failed to close {} provider", "active")
+    assert provider.aclose.await_count == 2
+    assert log_exception.call_count == 2
+    log_exception.assert_called_with("Failed to close {} provider", "active")
 
 
 @pytest.mark.asyncio
@@ -428,6 +429,71 @@ async def test_stop_closes_provider_when_mcp_cleanup_raises(tmp_path: Path) -> N
     await loop.stop()
 
     loop.close_mcp.assert_awaited_once_with()
+    provider.aclose.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_provider_close_can_be_retried_without_duplicate_close(
+    tmp_path: Path,
+) -> None:
+    provider = _provider("model")
+    close_started = asyncio.Event()
+    allow_close = asyncio.Event()
+
+    async def close_provider() -> None:
+        close_started.set()
+        await allow_close.wait()
+
+    provider.aclose = AsyncMock(side_effect=close_provider)
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path)
+
+    first_close = asyncio.create_task(
+        loop._close_provider_once(provider, description="active"),
+    )
+    await close_started.wait()
+    first_close.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first_close
+
+    retry = asyncio.create_task(
+        loop._close_provider_once(provider, description="active"),
+    )
+    await asyncio.sleep(0)
+    assert not retry.done()
+
+    allow_close.set()
+    await retry
+
+    provider.aclose.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_stop_cancels_queued_subagent_before_closing_provider(tmp_path: Path) -> None:
+    provider = _provider("model")
+    provider.chat_with_retry = AsyncMock()
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path)
+    subagent_started = asyncio.Event()
+
+    async def queued_subagent() -> None:
+        subagent_started.set()
+        await loop._llm_turn_gate.run(provider.chat_with_retry)
+
+    async with loop._llm_turn_gate.hold():
+        task = asyncio.create_task(queued_subagent())
+        loop.subagents._running_tasks["queued"] = task
+        await subagent_started.wait()
+
+        stop_task = asyncio.create_task(loop.stop())
+        await asyncio.sleep(0)
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert task.cancelled()
+        provider.aclose.assert_not_awaited()
+
+    await stop_task
+
+    provider.chat_with_retry.assert_not_awaited()
     provider.aclose.assert_awaited_once_with()
 
 

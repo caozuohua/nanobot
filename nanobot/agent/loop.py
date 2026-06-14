@@ -233,6 +233,7 @@ class AgentLoop:
         self._runtime_model_publisher = runtime_model_publisher
         self._provider_signature = provider_signature
         self._closed_provider_ids: set[int] = set()
+        self._provider_close_tasks: dict[int, asyncio.Task[None]] = {}
         self._llm_turn_gate = LLMTurnGate()
         self._default_selection_signature = preset_helpers.default_selection_signature(provider_signature)
         self.workspace = workspace
@@ -521,11 +522,24 @@ class AgentLoop:
         provider_id = id(provider)
         if provider_id in self._closed_provider_ids:
             return
-        self._closed_provider_ids.add(provider_id)
+        close_task = self._provider_close_tasks.get(provider_id)
+        if close_task is None:
+            close_task = asyncio.create_task(
+                self._finish_provider_close(provider, description=description),
+            )
+            self._provider_close_tasks[provider_id] = close_task
+        await asyncio.shield(close_task)
+
+    async def _finish_provider_close(self, provider: Any, *, description: str) -> None:
+        provider_id = id(provider)
         try:
             await provider.aclose()
         except Exception:
             logger.exception("Failed to close {} provider", description)
+        else:
+            self._closed_provider_ids.add(provider_id)
+        finally:
+            self._provider_close_tasks.pop(provider_id, None)
 
     async def _replace_provider_snapshot(
         self,
@@ -1261,12 +1275,17 @@ class AgentLoop:
         """Stop the agent loop."""
         self._running = False
         try:
-            await self.close_mcp()
+            await self.subagents.cancel_all()
         except Exception:
-            logger.exception("Failed to close MCP resources during shutdown")
+            logger.exception("Failed to stop subagents during shutdown")
         finally:
-            async with self._llm_turn_gate.hold():
-                await self._close_provider_once(self.provider, description="active")
+            try:
+                await self.close_mcp()
+            except Exception:
+                logger.exception("Failed to close MCP resources during shutdown")
+            finally:
+                async with self._llm_turn_gate.hold():
+                    await self._close_provider_once(self.provider, description="active")
         logger.info("Agent loop stopping")
 
     async def _process_system_message(
