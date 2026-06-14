@@ -286,7 +286,7 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
         else:
             name = names[index - 1]
     try:
-        loop.set_model_preset(name)
+        await loop.set_model_preset(name)
     except (KeyError, ValueError) as exc:
         names = _model_preset_names(loop)
         return OutboundMessage(

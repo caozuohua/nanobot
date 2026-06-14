@@ -232,6 +232,7 @@ class AgentLoop:
         self._preset_snapshot_loader = preset_snapshot_loader
         self._runtime_model_publisher = runtime_model_publisher
         self._provider_signature = provider_signature
+        self._closed_provider_ids: set[int] = set()
         self._default_selection_signature = preset_helpers.default_selection_signature(provider_signature)
         self.workspace = workspace
         self.model = model or provider.get_default_model()
@@ -342,9 +343,7 @@ class AgentLoop:
             session_ttl_minutes=session_ttl_minutes,
         )
         self.model_presets: dict[str, ModelPresetConfig] = model_presets or {}
-        self._active_preset: str | None = None
-        if model_preset:
-            self.set_model_preset(model_preset, publish_update=False)
+        self._active_preset = model_preset
         self._register_default_tools()
         self._runtime_vars: dict[str, Any] = {}
         self._current_iteration: int = 0
@@ -484,7 +483,13 @@ class AgentLoop:
 
     @model_preset.setter
     def model_preset(self, name: str | None) -> None:
-        self.set_model_preset(name)
+        """Apply in-place presets used by synchronous runtime-state tools."""
+        name = preset_helpers.normalize_preset_name(name, self.model_presets)
+        snapshot = self._build_model_preset_snapshot(name)
+        if snapshot.provider is not self.provider:
+            raise RuntimeError("provider-changing model presets must be awaited")
+        self._apply_provider_snapshot(snapshot, model_preset=name)
+        self._active_preset = name
 
     def _build_model_preset_snapshot(self, name: str) -> ProviderSnapshot:
         return preset_helpers.build_runtime_preset_snapshot(
@@ -494,12 +499,53 @@ class AgentLoop:
             loader=self._preset_snapshot_loader,
         )
 
-    def set_model_preset(self, name: str | None, *, publish_update: bool = True) -> None:
+    async def _close_provider_once(self, provider: Any, *, description: str) -> None:
+        provider_id = id(provider)
+        if provider_id in self._closed_provider_ids:
+            return
+        self._closed_provider_ids.add(provider_id)
+        try:
+            await provider.aclose()
+        except Exception:
+            logger.exception("Failed to close {} provider", description)
+
+    async def set_model_preset(
+        self,
+        name: str | None,
+        *,
+        publish_update: bool = True,
+    ) -> None:
         """Resolve a preset by name and apply all runtime model dependents."""
         name = preset_helpers.normalize_preset_name(name, self.model_presets)
         snapshot = self._build_model_preset_snapshot(name)
-        self._apply_provider_snapshot(snapshot, publish_update=publish_update, model_preset=name)
+        old_provider = self.provider
+        old_model = self.model
+        old_context_window_tokens = self.context_window_tokens
+        old_signature = self._provider_signature
+        try:
+            self._apply_provider_snapshot(
+                snapshot,
+                publish_update=publish_update,
+                model_preset=name,
+            )
+        except Exception:
+            self.provider = old_provider
+            self.model = old_model
+            self.context_window_tokens = old_context_window_tokens
+            self.runner.provider = old_provider
+            self.subagents.set_provider(old_provider, old_model)
+            self.consolidator.set_provider(
+                old_provider,
+                old_model,
+                old_context_window_tokens,
+            )
+            self._provider_signature = old_signature
+            if snapshot.provider is not old_provider:
+                await self._close_provider_once(snapshot.provider, description="candidate")
+            raise
         self._active_preset = name
+        if old_provider is not snapshot.provider:
+            await self._close_provider_once(old_provider, description="replaced")
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools via plugin loader."""
@@ -1154,9 +1200,10 @@ class AgentLoop:
         self._background_tasks.append(task)
         task.add_done_callback(self._background_tasks.remove)
 
-    def stop(self) -> None:
+    async def stop(self) -> None:
         """Stop the agent loop."""
         self._running = False
+        await self._close_provider_once(self.provider, description="active")
         logger.info("Agent loop stopping")
 
     async def _process_system_message(

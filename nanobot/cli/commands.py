@@ -1291,7 +1291,7 @@ def _run_gateway(
         finally:
             await agent.close_mcp()
             cron.stop()
-            agent.stop()
+            await agent.stop()
             await channels.stop_all()
             # Flush all cached sessions to durable storage before exit.
             # This prevents data loss on filesystems with write-back
@@ -1560,7 +1560,7 @@ def agent(
                         console.print("\nGoodbye!")
                         break
             finally:
-                agent_loop.stop()
+                await agent_loop.stop()
                 outbound_task.cancel()
                 await asyncio.gather(bus_task, outbound_task, return_exceptions=True)
                 await agent_loop.close_mcp()

@@ -1421,7 +1421,7 @@ def test_gateway_unbound_agent_cron_is_skipped(
         async def run(self) -> None:
             return None
 
-        def stop(self) -> None:
+        async def stop(self) -> None:
             return None
 
     class _StopAfterCronSetup:
@@ -1851,7 +1851,7 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
         async def close_mcp(self) -> None:
             return None
 
-        def stop(self) -> None:
+        async def stop(self) -> None:
             return None
 
     class _FakeChannelManager:

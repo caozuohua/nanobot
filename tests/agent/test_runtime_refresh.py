@@ -1,6 +1,8 @@
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
@@ -14,7 +16,115 @@ def _provider(default_model: str, max_tokens: int = 123) -> MagicMock:
     provider = MagicMock()
     provider.get_default_model.return_value = default_model
     provider.generation = SimpleNamespace(max_tokens=max_tokens)
+    provider.aclose = AsyncMock()
     return provider
+
+
+@pytest.mark.asyncio
+async def test_model_preset_switch_closes_old_provider_once(tmp_path: Path) -> None:
+    old_provider = _provider("old-model")
+    new_provider = _provider("new-model")
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=old_provider,
+        workspace=tmp_path,
+        model="old-model",
+        model_presets={"fast": Config().resolve_default_preset()},
+        preset_snapshot_loader=lambda _name: ProviderSnapshot(
+            provider=new_provider,
+            model="new-model",
+            context_window_tokens=2000,
+            signature=("new-model",),
+        ),
+    )
+
+    await loop.set_model_preset("fast")
+
+    assert loop.provider is new_provider
+    old_provider.aclose.assert_awaited_once_with()
+    new_provider.aclose.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_failed_model_preset_application_preserves_old_provider_and_closes_candidate(
+    tmp_path: Path,
+) -> None:
+    old_provider = _provider("old-model")
+    new_provider = _provider("new-model")
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=old_provider,
+        workspace=tmp_path,
+        model="old-model",
+        model_presets={"fast": Config().resolve_default_preset()},
+        preset_snapshot_loader=lambda _name: ProviderSnapshot(
+            provider=new_provider,
+            model="new-model",
+            context_window_tokens=2000,
+            signature=("new-model",),
+        ),
+    )
+    loop.subagents.set_provider = MagicMock(
+        side_effect=[RuntimeError("apply failed"), None],
+    )
+
+    with pytest.raises(RuntimeError, match="apply failed"):
+        await loop.set_model_preset("fast")
+
+    assert loop.provider is old_provider
+    assert loop.model == "old-model"
+    old_provider.aclose.assert_not_awaited()
+    new_provider.aclose.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_model_preset_cleanup_error_does_not_undo_successful_switch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    old_provider = _provider("old-model")
+    old_provider.aclose.side_effect = RuntimeError("close failed")
+    log_exception = MagicMock()
+    monkeypatch.setattr("nanobot.agent.loop.logger.exception", log_exception)
+    new_provider = _provider("new-model")
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=old_provider,
+        workspace=tmp_path,
+        model="old-model",
+        model_presets={"fast": Config().resolve_default_preset()},
+        preset_snapshot_loader=lambda _name: ProviderSnapshot(
+            provider=new_provider,
+            model="new-model",
+            context_window_tokens=2000,
+            signature=("new-model",),
+        ),
+    )
+
+    await loop.set_model_preset("fast")
+
+    assert loop.provider is new_provider
+    old_provider.aclose.assert_awaited_once_with()
+    log_exception.assert_called_once_with("Failed to close {} provider", "replaced")
+
+
+@pytest.mark.asyncio
+async def test_stop_closes_active_provider_once_and_ignores_cleanup_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = _provider("model")
+    provider.aclose.side_effect = RuntimeError("close failed")
+    log_exception = MagicMock()
+    monkeypatch.setattr("nanobot.agent.loop.logger.exception", log_exception)
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path)
+
+    await loop.stop()
+    await loop.stop()
+
+    assert loop._running is False
+    provider.aclose.assert_awaited_once_with()
+    log_exception.assert_called_once_with("Failed to close {} provider", "active")
 
 
 def test_provider_refresh_updates_all_model_dependents(tmp_path: Path) -> None:

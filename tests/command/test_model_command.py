@@ -116,7 +116,7 @@ async def test_model_command_switches_preset(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_model_command_switches_back_to_default(tmp_path) -> None:
     loop = _make_loop(tmp_path)
-    loop.set_model_preset("fast")
+    await loop.set_model_preset("fast")
 
     out = await cmd_model(_ctx(loop, "/model default", args="default"))
 

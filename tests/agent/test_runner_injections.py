@@ -608,7 +608,7 @@ async def test_followup_routed_to_pending_queue(tmp_path):
 
     queued_msg = await asyncio.wait_for(pending.get(), timeout=2)
 
-    loop.stop()
+    await loop.stop()
     await asyncio.wait_for(run_task, timeout=2)
 
     assert loop._dispatch.await_count == 0
@@ -651,7 +651,7 @@ async def test_cron_turn_deferred_while_session_active(tmp_path):
             break
         await asyncio.sleep(0.05)
 
-    loop.stop()
+    await loop.stop()
     await asyncio.wait_for(run_task, timeout=2)
 
     assert pending.empty()
@@ -778,7 +778,7 @@ async def test_pending_queue_full_falls_back_to_queued_task(tmp_path):
 
     await asyncio.wait_for(dispatched.wait(), timeout=2)
 
-    loop.stop()
+    await loop.stop()
     await asyncio.wait_for(run_task, timeout=2)
 
     assert loop._dispatch.await_count == 1

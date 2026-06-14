@@ -63,7 +63,8 @@ def test_model_preset_setter_updates_state(tmp_path) -> None:
     assert loop.consolidator.max_completion_tokens == 4096
 
 
-def test_model_preset_setter_calls_runtime_model_publisher(tmp_path) -> None:
+@pytest.mark.asyncio
+async def test_model_preset_setter_calls_runtime_model_publisher(tmp_path) -> None:
     published: list[tuple[str, str | None]] = []
     loop = AgentLoop(
         bus=MessageBus(),
@@ -75,12 +76,13 @@ def test_model_preset_setter_calls_runtime_model_publisher(tmp_path) -> None:
         runtime_model_publisher=lambda model, preset: published.append((model, preset)),
     )
 
-    loop.set_model_preset("fast")
+    await loop.set_model_preset("fast")
 
     assert published == [("openai/gpt-4.1", "fast")]
 
 
-def test_model_preset_setter_replaces_provider_from_snapshot(tmp_path) -> None:
+@pytest.mark.asyncio
+async def test_model_preset_setter_replaces_provider_from_snapshot(tmp_path) -> None:
     old_provider = _provider("base-model", max_tokens=123)
     new_provider = _provider("anthropic/claude-opus-4-5", max_tokens=2048)
     preset = ModelPresetConfig(
@@ -104,7 +106,7 @@ def test_model_preset_setter_replaces_provider_from_snapshot(tmp_path) -> None:
         ),
     )
 
-    loop.set_model_preset("deep")
+    await loop.set_model_preset("deep")
 
     assert loop.provider is new_provider
     assert loop.runner.provider is new_provider
@@ -116,7 +118,8 @@ def test_model_preset_setter_replaces_provider_from_snapshot(tmp_path) -> None:
     assert loop.consolidator.max_completion_tokens == 2048
 
 
-def test_model_preset_setter_failure_leaves_old_state(tmp_path) -> None:
+@pytest.mark.asyncio
+async def test_model_preset_setter_failure_leaves_old_state(tmp_path) -> None:
     preset = ModelPresetConfig(model="openai/gpt-4.1", max_tokens=4096)
     loop = AgentLoop(
         bus=MessageBus(),
@@ -131,7 +134,7 @@ def test_model_preset_setter_failure_leaves_old_state(tmp_path) -> None:
     )
 
     with pytest.raises(RuntimeError, match="provider unavailable"):
-        loop.set_model_preset("fast")
+        await loop.set_model_preset("fast")
 
     assert loop.model_preset is None
     assert loop.model == "base-model"
@@ -141,7 +144,8 @@ def test_model_preset_setter_failure_leaves_old_state(tmp_path) -> None:
     assert loop.consolidator.max_completion_tokens == 123
 
 
-def test_active_model_preset_survives_unchanged_config_refresh(tmp_path) -> None:
+@pytest.mark.asyncio
+async def test_active_model_preset_survives_unchanged_config_refresh(tmp_path) -> None:
     base_provider = _provider("base-model", max_tokens=123)
     fast_provider = _provider("openai/gpt-4.1", max_tokens=4096)
     default_snapshot = ProviderSnapshot(
@@ -168,7 +172,7 @@ def test_active_model_preset_survives_unchanged_config_refresh(tmp_path) -> None
         preset_snapshot_loader=lambda _name: fast_snapshot,
     )
 
-    loop.set_model_preset("fast")
+    await loop.set_model_preset("fast")
     loop._refresh_provider_snapshot()
 
     assert loop.model_preset == "fast"
@@ -176,7 +180,8 @@ def test_active_model_preset_survives_unchanged_config_refresh(tmp_path) -> None
     assert loop.model == "openai/gpt-4.1"
 
 
-def test_config_model_refresh_clears_active_model_preset(tmp_path) -> None:
+@pytest.mark.asyncio
+async def test_config_model_refresh_clears_active_model_preset(tmp_path) -> None:
     base_provider = _provider("base-model", max_tokens=123)
     fast_provider = _provider("openai/gpt-4.1", max_tokens=4096)
     webui_provider = _provider("anthropic/claude-opus-4-5", max_tokens=2048)
@@ -204,7 +209,7 @@ def test_config_model_refresh_clears_active_model_preset(tmp_path) -> None:
         preset_snapshot_loader=lambda _name: fast_snapshot,
     )
 
-    loop.set_model_preset("fast")
+    await loop.set_model_preset("fast")
     loop._refresh_provider_snapshot()
 
     assert loop.model_preset is None
@@ -213,10 +218,11 @@ def test_config_model_refresh_clears_active_model_preset(tmp_path) -> None:
     assert loop.context_window_tokens == 200_000
 
 
-def test_model_preset_setter_raises_on_unknown(tmp_path) -> None:
+@pytest.mark.asyncio
+async def test_model_preset_setter_raises_on_unknown(tmp_path) -> None:
     loop = _make_loop(tmp_path)
     with pytest.raises(KeyError, match="model_preset 'missing' not found"):
-        loop.model_preset = "missing"
+        await loop.set_model_preset("missing")
 
 
 def test_model_preset_setter_raises_on_empty_string(tmp_path) -> None:

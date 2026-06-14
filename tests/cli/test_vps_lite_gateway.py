@@ -197,7 +197,7 @@ def test_vps_lite_gateway_omits_webui_and_public_listener_and_threads_profile(
         async def close_mcp(self) -> None:
             return None
 
-        def stop(self) -> None:
+        async def stop(self) -> None:
             return None
 
     class _FakeChannels:
