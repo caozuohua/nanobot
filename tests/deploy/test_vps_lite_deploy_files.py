@@ -177,3 +177,6 @@ def test_vps_updater_cleanup_uses_guarded_global_temp_directory() -> None:
     assert 'rm -rf -- "${BUILD_ROOT}"' in text
     assert "trap cleanup EXIT" in text
     assert "trap 'rm -rf" not in text
+    assert 'install -d -o "${SERVICE_USER}" -g "${SERVICE_USER}" -m 0700 \\' in text
+    assert '"${build_root}" "${build_root}/tmp" "${wheel_dir}"' in text
+    assert 'export TMPDIR="${BUILD_ROOT}/tmp"' in text

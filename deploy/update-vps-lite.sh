@@ -63,7 +63,7 @@ build_and_test() {
   local wheel_dir="${build_root}/wheel"
 
   install -d -o "${SERVICE_USER}" -g "${SERVICE_USER}" -m 0700 \
-    "${build_root}" "${wheel_dir}"
+    "${build_root}" "${build_root}/tmp" "${wheel_dir}"
   run_as_nanobot python3 -m venv "${build_venv}"
   run_as_nanobot "${build_venv}/bin/python" -m pip install --quiet \
     --upgrade pip build hatchling packaging pytest pytest-asyncio >&2
@@ -134,6 +134,7 @@ main() {
   local deployed_commit
   BUILD_ROOT=$(mktemp -d /var/tmp/nanobot-update.XXXXXX)
   trap cleanup EXIT
+  export TMPDIR="${BUILD_ROOT}/tmp"
   build_and_test "${BUILD_ROOT}"
 
   install_runtime "${BUILT_WHEEL}"
