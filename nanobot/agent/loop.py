@@ -159,9 +159,9 @@ class AgentLoop:
     def tool_names(self) -> list[str]:
         return self.tools.tool_names
 
-    def llm_runtime(self) -> LLMRuntime:
+    async def llm_runtime(self) -> LLMRuntime:
         """Return the current provider/model pair owned by this loop."""
-        self._refresh_provider_snapshot()
+        await self._refresh_provider_snapshot()
         return LLMRuntime(self.provider, self.model)
 
     _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
@@ -453,7 +453,7 @@ class AgentLoop:
             )
         logger.info("Runtime model switched for next turn: {} -> {}", old_model, model)
 
-    def _refresh_provider_snapshot(self) -> None:
+    async def _refresh_provider_snapshot(self) -> None:
         if self._provider_snapshot_loader is None:
             return
         try:
@@ -463,19 +463,32 @@ class AgentLoop:
             return
         default_selection = preset_helpers.default_selection_signature(snapshot.signature)
         if self._active_preset and self._default_selection_signature in (None, default_selection):
-            self._default_selection_signature = default_selection
             try:
-                snapshot = self._build_model_preset_snapshot(self._active_preset)
+                preset_snapshot = self._build_model_preset_snapshot(self._active_preset)
             except Exception:
+                if snapshot.provider is not self.provider:
+                    await self._close_provider_once(snapshot.provider, description="candidate")
                 logger.exception("Failed to refresh active model preset")
                 return
+            if snapshot.provider is not self.provider and snapshot.provider is not preset_snapshot.provider:
+                await self._close_provider_once(snapshot.provider, description="candidate")
+            snapshot = preset_snapshot
+            next_active_preset = self._active_preset
         else:
-            self._active_preset = None
-            self._default_selection_signature = default_selection
+            next_active_preset = None
         if snapshot.signature == self._provider_signature:
+            if snapshot.provider is not self.provider:
+                await self._close_provider_once(snapshot.provider, description="candidate")
+            self._active_preset = next_active_preset
+            self._default_selection_signature = default_selection
             return
+        try:
+            await self._replace_provider_snapshot(snapshot)
+        except Exception:
+            logger.exception("Failed to apply refreshed provider config")
+            return
+        self._active_preset = next_active_preset
         self._default_selection_signature = preset_helpers.default_selection_signature(snapshot.signature)
-        self._apply_provider_snapshot(snapshot)
 
     @property
     def model_preset(self) -> str | None:
@@ -509,15 +522,13 @@ class AgentLoop:
         except Exception:
             logger.exception("Failed to close {} provider", description)
 
-    async def set_model_preset(
+    async def _replace_provider_snapshot(
         self,
-        name: str | None,
+        snapshot: ProviderSnapshot,
         *,
         publish_update: bool = True,
+        model_preset: str | None = None,
     ) -> None:
-        """Resolve a preset by name and apply all runtime model dependents."""
-        name = preset_helpers.normalize_preset_name(name, self.model_presets)
-        snapshot = self._build_model_preset_snapshot(name)
         old_provider = self.provider
         old_model = self.model
         old_context_window_tokens = self.context_window_tokens
@@ -526,7 +537,7 @@ class AgentLoop:
             self._apply_provider_snapshot(
                 snapshot,
                 publish_update=publish_update,
-                model_preset=name,
+                model_preset=model_preset,
             )
         except Exception:
             self.provider = old_provider
@@ -543,9 +554,24 @@ class AgentLoop:
             if snapshot.provider is not old_provider:
                 await self._close_provider_once(snapshot.provider, description="candidate")
             raise
-        self._active_preset = name
         if old_provider is not snapshot.provider:
             await self._close_provider_once(old_provider, description="replaced")
+
+    async def set_model_preset(
+        self,
+        name: str | None,
+        *,
+        publish_update: bool = True,
+    ) -> None:
+        """Resolve a preset by name and apply all runtime model dependents."""
+        name = preset_helpers.normalize_preset_name(name, self.model_presets)
+        snapshot = self._build_model_preset_snapshot(name)
+        await self._replace_provider_snapshot(
+            snapshot,
+            publish_update=publish_update,
+            model_preset=name,
+        )
+        self._active_preset = name
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools via plugin loader."""
@@ -1316,7 +1342,7 @@ class AgentLoop:
         tools: ToolRegistry | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
-        self._refresh_provider_snapshot()
+        await self._refresh_provider_snapshot()
 
         if msg.channel == "system":
             return await self._process_system_message(
@@ -1530,7 +1556,7 @@ class AgentLoop:
         ctx.history = ctx.session.get_history(**_hist_kwargs)
         self._runtime_events().record_turn_runtime(
             ctx.session_key,
-            self.llm_runtime(),
+            LLMRuntime(self.provider, self.model),
         )
 
         ctx.initial_messages = self._build_initial_messages(

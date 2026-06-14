@@ -173,7 +173,7 @@ async def test_active_model_preset_survives_unchanged_config_refresh(tmp_path) -
     )
 
     await loop.set_model_preset("fast")
-    loop._refresh_provider_snapshot()
+    await loop._refresh_provider_snapshot()
 
     assert loop.model_preset == "fast"
     assert loop.provider is fast_provider
@@ -210,7 +210,7 @@ async def test_config_model_refresh_clears_active_model_preset(tmp_path) -> None
     )
 
     await loop.set_model_preset("fast")
-    loop._refresh_provider_snapshot()
+    await loop._refresh_provider_snapshot()
 
     assert loop.model_preset is None
     assert loop.provider is webui_provider

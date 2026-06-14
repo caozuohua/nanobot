@@ -127,7 +127,8 @@ async def test_stop_closes_active_provider_once_and_ignores_cleanup_errors(
     log_exception.assert_called_once_with("Failed to close {} provider", "active")
 
 
-def test_provider_refresh_updates_all_model_dependents(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_provider_refresh_updates_all_model_dependents(tmp_path: Path) -> None:
     old_provider = _provider("old-model")
     new_provider = _provider("new-model", max_tokens=456)
     loop = AgentLoop(
@@ -144,7 +145,7 @@ def test_provider_refresh_updates_all_model_dependents(tmp_path: Path) -> None:
         ),
     )
 
-    loop._refresh_provider_snapshot()
+    await loop._refresh_provider_snapshot()
 
     assert loop.provider is new_provider
     assert loop.model == "new-model"
@@ -159,7 +160,8 @@ def test_provider_refresh_updates_all_model_dependents(tmp_path: Path) -> None:
     assert loop.consolidator.max_completion_tokens == 456
 
 
-def test_llm_runtime_refreshes_provider_snapshot(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_llm_runtime_refreshes_provider_snapshot(tmp_path: Path) -> None:
     old_provider = _provider("old-model")
     new_provider = _provider("new-model", max_tokens=456)
     loop = AgentLoop(
@@ -176,7 +178,7 @@ def test_llm_runtime_refreshes_provider_snapshot(tmp_path: Path) -> None:
         ),
     )
 
-    runtime = loop.llm_runtime()
+    runtime = await loop.llm_runtime()
 
     assert runtime.provider is new_provider
     assert runtime.model == "new-model"
@@ -184,7 +186,8 @@ def test_llm_runtime_refreshes_provider_snapshot(tmp_path: Path) -> None:
     assert loop.runner.provider is new_provider
 
 
-def test_settings_context_window_refreshes_runtime_state(
+@pytest.mark.asyncio
+async def test_settings_context_window_refreshes_runtime_state(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -204,8 +207,83 @@ def test_settings_context_window_refreshes_runtime_state(
     loop = AgentLoop.from_config(config, provider_snapshot_loader=loader)
 
     payload = update_agent_settings({"context_window_tokens": ["262144"]})
-    loop._refresh_provider_snapshot()
+    await loop._refresh_provider_snapshot()
 
     assert payload["requires_restart"] is False
     assert loop.context_window_tokens == 262_144
     assert loop.consolidator.context_window_tokens == 262_144
+
+
+@pytest.mark.asyncio
+async def test_provider_refresh_closes_replaced_provider(tmp_path: Path) -> None:
+    old_provider = _provider("old-model")
+    new_provider = _provider("new-model")
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=old_provider,
+        workspace=tmp_path,
+        provider_snapshot_loader=lambda: ProviderSnapshot(
+            provider=new_provider,
+            model="new-model",
+            context_window_tokens=2000,
+            signature=("new-model",),
+        ),
+    )
+
+    await loop._refresh_provider_snapshot()
+
+    old_provider.aclose.assert_awaited_once_with()
+    new_provider.aclose.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_provider_refresh_closes_unchanged_candidate(tmp_path: Path) -> None:
+    active_provider = _provider("model")
+    candidate_provider = _provider("model")
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=active_provider,
+        workspace=tmp_path,
+        provider_signature=("same",),
+        provider_snapshot_loader=lambda: ProviderSnapshot(
+            provider=candidate_provider,
+            model="model",
+            context_window_tokens=1000,
+            signature=("same",),
+        ),
+    )
+
+    await loop._refresh_provider_snapshot()
+
+    assert loop.provider is active_provider
+    candidate_provider.aclose.assert_awaited_once_with()
+    active_provider.aclose.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_failed_provider_refresh_preserves_old_provider_and_closes_candidate(
+    tmp_path: Path,
+) -> None:
+    old_provider = _provider("old-model")
+    candidate_provider = _provider("new-model")
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=old_provider,
+        workspace=tmp_path,
+        provider_snapshot_loader=lambda: ProviderSnapshot(
+            provider=candidate_provider,
+            model="new-model",
+            context_window_tokens=2000,
+            signature=("new-model",),
+        ),
+    )
+    loop.subagents.set_provider = MagicMock(
+        side_effect=[RuntimeError("apply failed"), None],
+    )
+
+    await loop._refresh_provider_snapshot()
+
+    assert loop.provider is old_provider
+    assert loop.model == "old-model"
+    old_provider.aclose.assert_not_awaited()
+    candidate_provider.aclose.assert_awaited_once_with()
