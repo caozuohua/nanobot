@@ -711,7 +711,7 @@ def build_help_text(profile=None) -> str:
                 command = f"{command} {spec.arg_hint}"
             lines.append(f"{command} — {spec.description}")
         return "\n".join(lines)
-    lite_hidden = {"/goal", "/dream", "/dream-log", "/dream-restore"}
+    lite_hidden = {"/dream", "/dream-log", "/dream-restore"}
     visible = [
         spec for spec in BUILTIN_COMMAND_SPECS
         if not runtime.is_lite or spec.command not in lite_hidden
@@ -719,6 +719,7 @@ def build_help_text(profile=None) -> str:
     groups = (
         ("会话", {"/new", "/stop", "/history"}),
         ("模型", {"/model"}),
+        ("任务", {"/goal"}),
         ("能力", {"/skill"}),
         ("维护", {"/status", "/restart", "/pairing", "/help"}),
     )
@@ -727,6 +728,7 @@ def build_help_text(profile=None) -> str:
         "/stop": "停止当前任务",
         "/history": "最近消息",
         "/model": "查看或切换模型",
+        "/goal": "持续任务",
         "/skill": "可用技能",
         "/status": "运行状态",
         "/restart": "重启 nanobot",
@@ -743,6 +745,8 @@ def build_help_text(profile=None) -> str:
             command = spec.command
             if spec.command == "/model":
                 command += " [序号|preset]"
+            elif spec.command == "/goal":
+                command += " <目标>"
             elif spec.command == "/pairing":
                 command += " [操作]"
             elif spec.arg_hint:

@@ -149,7 +149,16 @@ def test_loader_module_allowlist_limits_discovery():
 
 
 def test_lite_profile_filters_modules_before_import(monkeypatch):
-    allowed = {"filesystem", "apply_patch", "shell", "web", "cron", "message"}
+    allowed = {
+        "filesystem",
+        "apply_patch",
+        "shell",
+        "web",
+        "cron",
+        "message",
+        "external_resources",
+        "long_task",
+    }
     imported: list[str] = []
     original_import = importlib.import_module
 
@@ -168,7 +177,8 @@ def test_lite_profile_filters_modules_before_import(monkeypatch):
 
     assert imported
     assert module_names <= allowed
-    assert {"my", "image_generation", "spawn", "long_task", "cli_apps"}.isdisjoint(module_names)
+    assert "long_task" in module_names
+    assert {"my", "image_generation", "spawn", "cli_apps"}.isdisjoint(module_names)
 
 
 def test_lite_profile_disables_entrypoint_plugins(monkeypatch):

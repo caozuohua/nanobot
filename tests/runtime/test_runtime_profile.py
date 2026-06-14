@@ -35,6 +35,7 @@ def test_vps_lite_profile_has_explicit_runtime_allowlists():
         "shell",
         "web",
         "cron",
+        "long_task",
         "message",
         "external_resources",
     })

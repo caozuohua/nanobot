@@ -140,6 +140,7 @@ def test_vps_lite_wheel_contains_only_supported_runtime_surfaces(lite_wheel: Pat
     assert "nanobot/cli/commands.py" in files
     assert "nanobot/agent/tools/web.py" in files
     assert "nanobot/agent/tools/mcp.py" in files
+    assert "nanobot/agent/tools/long_task.py" in files
     assert "nanobot/providers/openai_responses/parsing.py" in files
     assert "nanobot/skills/memory/SKILL.md" in files
     assert "nanobot/skills/cron/SKILL.md" in files

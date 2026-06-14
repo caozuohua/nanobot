@@ -85,7 +85,7 @@ VPS_LITE_PROFILE = RuntimeProfile(
     providers=frozenset({"vertex_ai", "gemini", "openai", "custom"}),
     tools=frozenset({
         "filesystem", "apply_patch", "shell", "web", "cron", "message",
-        "external_resources",
+        "external_resources", "long_task",
     }),
     skills=frozenset({"memory", "cron"}),
     allow_entrypoint_plugins=False,

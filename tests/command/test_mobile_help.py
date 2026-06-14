@@ -8,6 +8,6 @@ def test_vps_lite_help_is_grouped_and_hides_unavailable_commands() -> None:
     assert "模型" in text
     assert "维护" in text
     assert "/model [序号|preset]" in text
-    assert "/goal" not in text
+    assert "/goal <目标>" in text
     assert "/dream" not in text
     assert max(map(len, text.splitlines())) <= 42
