@@ -63,7 +63,7 @@ from nanobot.utils.document import extract_documents, reference_non_image_attach
 from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
 from nanobot.utils.image_generation_intent import image_generation_prompt
-from nanobot.utils.llm_runtime import LLMRuntime
+from nanobot.utils.llm_runtime import LLMRuntime, LLMTurnGate
 from nanobot.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
     SUSTAINED_GOAL_CONTINUE_PROMPT,
@@ -162,7 +162,7 @@ class AgentLoop:
     async def llm_runtime(self) -> LLMRuntime:
         """Return the current provider/model pair owned by this loop."""
         await self._refresh_provider_snapshot()
-        return LLMRuntime(self.provider, self.model)
+        return LLMRuntime(self.provider, self.model, self._llm_turn_gate)
 
     _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
     _PENDING_USER_TURN_KEY = "pending_user_turn"
@@ -233,6 +233,7 @@ class AgentLoop:
         self._runtime_model_publisher = runtime_model_publisher
         self._provider_signature = provider_signature
         self._closed_provider_ids: set[int] = set()
+        self._llm_turn_gate = LLMTurnGate()
         self._default_selection_signature = preset_helpers.default_selection_signature(provider_signature)
         self.workspace = workspace
         self.model = model or provider.get_default_model()
@@ -286,7 +287,7 @@ class AgentLoop:
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.
         self._file_state_store = FileStateStore()
-        self.runner = AgentRunner(provider)
+        self.runner = AgentRunner(provider, llm_turn_gate=self._llm_turn_gate)
         self.subagents = SubagentManager(
             provider=provider,
             workspace=workspace,
@@ -300,6 +301,7 @@ class AgentLoop:
             max_iterations=self.max_iterations,
             max_concurrent_subagents=max_concurrent_subagents,
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
+            llm_turn_gate=self._llm_turn_gate,
         )
         self._unified_session = unified_session
         self._max_messages = max_messages if max_messages > 0 else 120
@@ -336,6 +338,7 @@ class AgentLoop:
             max_completion_tokens=provider.generation.max_tokens,
             consolidation_ratio=consolidation_ratio,
             unified_session=unified_session,
+            llm_turn_gate=self._llm_turn_gate,
         )
         self.auto_compact = AutoCompact(
             sessions=self.sessions,
@@ -498,6 +501,8 @@ class AgentLoop:
     def model_preset(self, name: str | None) -> None:
         """Apply in-place presets used by synchronous runtime-state tools."""
         name = preset_helpers.normalize_preset_name(name, self.model_presets)
+        if self._preset_snapshot_loader is not None or self._llm_turn_gate.lock.locked():
+            raise RuntimeError("provider-changing model presets must be awaited")
         snapshot = self._build_model_preset_snapshot(name)
         if snapshot.provider is not self.provider:
             raise RuntimeError("provider-changing model presets must be awaited")
@@ -529,6 +534,20 @@ class AgentLoop:
         publish_update: bool = True,
         model_preset: str | None = None,
     ) -> None:
+        async with self._llm_turn_gate.hold():
+            await self._replace_provider_snapshot_locked(
+                snapshot,
+                publish_update=publish_update,
+                model_preset=model_preset,
+            )
+
+    async def _replace_provider_snapshot_locked(
+        self,
+        snapshot: ProviderSnapshot,
+        *,
+        publish_update: bool,
+        model_preset: str | None,
+    ) -> None:
         old_provider = self.provider
         old_model = self.model
         old_context_window_tokens = self.context_window_tokens
@@ -544,15 +563,22 @@ class AgentLoop:
             self.model = old_model
             self.context_window_tokens = old_context_window_tokens
             self.runner.provider = old_provider
-            self.subagents.set_provider(old_provider, old_model)
-            self.consolidator.set_provider(
-                old_provider,
-                old_model,
-                old_context_window_tokens,
-            )
             self._provider_signature = old_signature
-            if snapshot.provider is not old_provider:
-                await self._close_provider_once(snapshot.provider, description="candidate")
+            try:
+                self.subagents.set_provider(old_provider, old_model)
+            except Exception:
+                logger.exception("Failed to restore subagent provider after switch failure")
+            try:
+                self.consolidator.set_provider(
+                    old_provider,
+                    old_model,
+                    old_context_window_tokens,
+                )
+            except Exception:
+                logger.exception("Failed to restore consolidator provider after switch failure")
+            finally:
+                if snapshot.provider is not old_provider:
+                    await self._close_provider_once(snapshot.provider, description="candidate")
             raise
         if old_provider is not snapshot.provider:
             await self._close_provider_once(old_provider, description="replaced")
@@ -1229,7 +1255,8 @@ class AgentLoop:
     async def stop(self) -> None:
         """Stop the agent loop."""
         self._running = False
-        await self._close_provider_once(self.provider, description="active")
+        async with self._llm_turn_gate.hold():
+            await self._close_provider_once(self.provider, description="active")
         logger.info("Agent loop stopping")
 
     async def _process_system_message(
@@ -1556,7 +1583,7 @@ class AgentLoop:
         ctx.history = ctx.session.get_history(**_hist_kwargs)
         self._runtime_events().record_turn_runtime(
             ctx.session_key,
-            LLMRuntime(self.provider, self.model),
+            LLMRuntime(self.provider, self.model, self._llm_turn_gate),
         )
 
         ctx.initial_messages = self._build_initial_messages(
