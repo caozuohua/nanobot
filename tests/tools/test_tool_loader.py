@@ -225,6 +225,20 @@ def test_fs_tool_create_respects_restrict_to_workspace():
     assert tool._allowed_dir == Path("/tmp/test")
 
 
+def test_fs_tool_create_adds_configured_allowed_dirs():
+    from nanobot.agent.tools.filesystem import ReadFileTool
+
+    mock_config = MagicMock()
+    mock_config.restrict_to_workspace = True
+    mock_config.extra_allowed_dirs = ["/var/www/blog"]
+    mock_config.exec.sandbox = ""
+    ctx = ToolContext(config=mock_config, workspace="/tmp/test")
+
+    tool = ReadFileTool.create(ctx)
+
+    assert Path("/var/www/blog") in tool._extra_allowed_dirs
+
+
 def test_fs_tool_create_respects_sandbox():
     from nanobot.agent.tools.filesystem import ReadFileTool
     mock_config = MagicMock()
