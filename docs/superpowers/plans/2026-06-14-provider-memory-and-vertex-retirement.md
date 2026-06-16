@@ -704,7 +704,7 @@ and installs successfully in isolation.
 
 ```bash
 git status --short --branch
-git push origin codex/vps-lite
+git push origin main
 ```
 
 Expected: the remote branch reaches the local commit and the worktree remains clean.

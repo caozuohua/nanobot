@@ -3,7 +3,7 @@
 ## Goal
 
 Provide a repository-owned VPS update command that pulls the fixed
-`codex/vps-lite` branch from GitHub, builds and validates the Lite wheel, installs
+`main` branch from GitHub, builds and validates the Lite wheel, installs
 it, and restarts nanobot. The login user `caozuohua99` can invoke the command
 directly without receiving general root access.
 
@@ -11,7 +11,7 @@ directly without receiving general root access.
 
 - Source checkout: `/opt/workspace/nanobot/nanobot_repo`
 - Git remote: `git@github.com:caozuohua/nanobot.git`
-- Git branch: `codex/vps-lite`
+- Git branch: `main`
 - Service account: `nanobot`
 - Runtime virtual environment: `/opt/nanobot/.venv`
 - Service: `nanobot.service`
@@ -25,12 +25,12 @@ only for installing the verified wheel and restarting the fixed service.
 1. Acquire a non-blocking lock so two updates cannot run concurrently.
 2. Verify the source path is the expected Git repository.
 3. Verify the configured origin URL and current branch exactly match the
-   approved remote and `codex/vps-lite`.
+   approved remote and `main`.
 4. Refuse to continue when the worktree or index is dirty.
 5. Fetch the approved branch from origin.
 6. Require the local commit to be an ancestor of the fetched commit; refuse
    divergent history.
-7. Fast-forward with `git merge --ff-only origin/codex/vps-lite`.
+7. Fast-forward with `git merge --ff-only origin/main`.
 8. Build a `vps-lite` wheel in a temporary directory as `nanobot`.
 9. Run focused artifact, provider, deployment and external-resource tests before
    changing the runtime.

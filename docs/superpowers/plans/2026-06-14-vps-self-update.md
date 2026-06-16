@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add and register a safe VPS command that updates nanobot from the fixed `codex/vps-lite` GitHub branch.
+**Goal:** Add and register a safe VPS command that updates nanobot from the fixed `main` GitHub branch.
 
 **Architecture:** A root-owned updater validates a fixed source checkout, runs Git/build/test work as `nanobot`, and performs only the final wheel installation and service restart as root. A dedicated sudoers file grants `caozuohua99` access only to this argument-free updater.
 

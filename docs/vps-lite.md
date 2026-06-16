@@ -84,7 +84,7 @@ sudo systemctl enable --now luck-agent.service
 
 ## Updating From GitHub On The VPS
 
-The registered updater follows only `origin/codex/vps-lite` from
+The registered updater follows only `origin/main` from
 `/opt/workspace/nanobot/nanobot_repo`. After pushing Windows development
 changes to GitHub, log in as `caozuohua99` and run:
 

@@ -159,7 +159,7 @@ def test_vps_updater_is_fixed_safe_and_validates_before_install() -> None:
     assert "set -euo pipefail" in text
     assert "SOURCE_DIR=/opt/workspace/nanobot/nanobot_repo" in text
     assert "APPROVED_REMOTE=git@github.com:caozuohua/nanobot.git" in text
-    assert "APPROVED_BRANCH=codex/vps-lite" in text
+    assert "APPROVED_BRANCH=main" in text
     assert "flock -n" in text
     assert "status --porcelain" in text
     assert 'fetch origin "${APPROVED_BRANCH}"' in text

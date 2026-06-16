@@ -3,7 +3,7 @@ set -euo pipefail
 
 readonly SOURCE_DIR=/opt/workspace/nanobot/nanobot_repo
 readonly APPROVED_REMOTE=git@github.com:caozuohua/nanobot.git
-readonly APPROVED_BRANCH=codex/vps-lite
+readonly APPROVED_BRANCH=main
 readonly SERVICE_USER=nanobot
 readonly SERVICE_NAME=nanobot.service
 readonly VENV_PYTHON=/opt/nanobot/.venv/bin/python
