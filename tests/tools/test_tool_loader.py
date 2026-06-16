@@ -14,7 +14,7 @@ from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.loader import _SKIP_MODULES, ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.schema import ToolsConfig
-from nanobot.runtime_profile import RuntimeProfile, RuntimeProfileError
+from nanobot.runtime_profile import VPS_LITE_PROFILE, RuntimeProfileError
 
 
 class _MinimalTool(Tool):
@@ -149,7 +149,16 @@ def test_loader_module_allowlist_limits_discovery():
 
 
 def test_lite_profile_filters_modules_before_import(monkeypatch):
-    allowed = {"filesystem", "apply_patch", "shell", "web", "cron", "message"}
+    allowed = {
+        "filesystem",
+        "apply_patch",
+        "shell",
+        "web",
+        "cron",
+        "message",
+        "external_resources",
+        "long_task",
+    }
     imported: list[str] = []
     original_import = importlib.import_module
 
@@ -161,14 +170,15 @@ def test_lite_profile_filters_modules_before_import(monkeypatch):
         return original_import(name, package)
 
     monkeypatch.setattr("nanobot.agent.tools.loader.importlib.import_module", guarded_import)
-    loader = ToolLoader(profile=RuntimeProfile.VPS_LITE)
+    loader = ToolLoader(profile=VPS_LITE_PROFILE)
 
     discovered = loader.discover()
     module_names = {cls.__module__.rsplit(".", 1)[-1] for cls in discovered}
 
     assert imported
     assert module_names <= allowed
-    assert {"my", "image_generation", "spawn", "long_task", "cli_apps"}.isdisjoint(module_names)
+    assert "long_task" in module_names
+    assert {"my", "image_generation", "spawn", "cli_apps"}.isdisjoint(module_names)
 
 
 def test_lite_profile_disables_entrypoint_plugins(monkeypatch):
@@ -176,7 +186,7 @@ def test_lite_profile_disables_entrypoint_plugins(monkeypatch):
         raise AssertionError("entry_points should not be queried in vps-lite")
 
     monkeypatch.setattr("nanobot.agent.tools.loader.entry_points", fail_entry_points)
-    loader = ToolLoader(profile=RuntimeProfile.VPS_LITE)
+    loader = ToolLoader(profile=VPS_LITE_PROFILE)
 
     assert loader._discover_plugins() == {}
 
@@ -195,7 +205,7 @@ def test_lite_profile_raises_for_configured_excluded_capabilities(
     tools = ToolsConfig()
     mutator(tools)
     ctx = ToolContext(config=tools, workspace="/tmp")
-    loader = ToolLoader(profile=RuntimeProfile.VPS_LITE)
+    loader = ToolLoader(profile=VPS_LITE_PROFILE)
 
     with pytest.raises(RuntimeProfileError, match=expected_fragment):
         loader.load(ctx, registry=ToolRegistry())
@@ -223,6 +233,20 @@ def test_fs_tool_create_respects_restrict_to_workspace():
     ctx = ToolContext(config=mock_config, workspace="/tmp/test")
     tool = ReadFileTool.create(ctx)
     assert tool._allowed_dir == Path("/tmp/test")
+
+
+def test_fs_tool_create_adds_configured_allowed_dirs():
+    from nanobot.agent.tools.filesystem import ReadFileTool
+
+    mock_config = MagicMock()
+    mock_config.restrict_to_workspace = True
+    mock_config.extra_allowed_dirs = ["/var/www/blog"]
+    mock_config.exec.sandbox = ""
+    ctx = ToolContext(config=mock_config, workspace="/tmp/test")
+
+    tool = ReadFileTool.create(ctx)
+
+    assert Path("/var/www/blog") in tool._extra_allowed_dirs
 
 
 def test_fs_tool_create_respects_sandbox():

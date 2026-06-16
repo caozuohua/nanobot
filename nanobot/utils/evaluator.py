@@ -14,6 +14,7 @@ from nanobot.utils.prompt_templates import render_template
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
+    from nanobot.utils.llm_runtime import LLMTurnGate
 
 _EVALUATE_TOOL = [
     {
@@ -45,6 +46,7 @@ async def evaluate_response(
     provider: LLMProvider,
     model: str,
     default_notify: bool = True,
+    llm_turn_gate: LLMTurnGate | None = None,
 ) -> bool:
     """Decide whether a heartbeat result should be delivered to the user.
 
@@ -52,20 +54,30 @@ async def evaluate_response(
     ``False`` to fail closed.
     """
     try:
-        llm_response = await provider.chat_with_retry(
-            messages=[
-                {"role": "system", "content": render_template("agent/evaluator.md", part="system")},
-                {"role": "user", "content": render_template(
-                    "agent/evaluator.md",
-                    part="user",
-                    task_context=task_context,
-                    response=response,
-                )},
-            ],
-            tools=_EVALUATE_TOOL,
-            model=model,
-            max_tokens=256,
-            temperature=0.0,
+        async def _evaluate():
+            return await provider.chat_with_retry(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": render_template("agent/evaluator.md", part="system"),
+                    },
+                    {"role": "user", "content": render_template(
+                        "agent/evaluator.md",
+                        part="user",
+                        task_context=task_context,
+                        response=response,
+                    )},
+                ],
+                tools=_EVALUATE_TOOL,
+                model=model,
+                max_tokens=256,
+                temperature=0.0,
+            )
+
+        llm_response = (
+            await llm_turn_gate.run(_evaluate)
+            if llm_turn_gate is not None
+            else await _evaluate()
         )
 
         if not llm_response.should_execute_tools:

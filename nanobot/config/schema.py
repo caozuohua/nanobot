@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from nanobot.agent.tools.self import MyToolConfig
     from nanobot.agent.tools.shell import ExecToolConfig
     from nanobot.agent.tools.web import WebToolsConfig
+    from nanobot.runtime_profile import RuntimeProfile
 
 
 class Base(BaseModel):
@@ -193,6 +194,13 @@ class BedrockProviderConfig(ProviderConfig):
     profile: str | None = None  # Optional AWS shared config profile
 
 
+class VertexAIProviderConfig(ProviderConfig):
+    """Google Vertex AI provider configuration."""
+
+    project: str | None = None  # Falls back to GOOGLE_CLOUD_PROJECT
+    location: str | None = None  # Falls back to GOOGLE_CLOUD_LOCATION
+
+
 class ProvidersConfig(Base):
     """Configuration for LLM providers.
 
@@ -220,6 +228,7 @@ class ProvidersConfig(Base):
     lm_studio: ProviderConfig = Field(default_factory=ProviderConfig)  # LM Studio local models
     atomic_chat: ProviderConfig = Field(default_factory=ProviderConfig)  # Atomic Chat local models
     ovms: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenVINO Model Server (OVMS)
+    vertex_ai: VertexAIProviderConfig = Field(default_factory=VertexAIProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -308,6 +317,16 @@ class MCPServerConfig(Base):
     tool_timeout: int = 30  # seconds before a tool call is cancelled
     enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
 
+    def resolve_transport(self) -> tuple[str | None, str]:
+        """Return the effective transport type and how it was selected."""
+        if self.type:
+            return self.type, "explicit type"
+        if self.command:
+            return "stdio", "command-based stdio"
+        if self.url:
+            return ("sse" if self.url.rstrip("/").endswith("/sse") else "streamableHttp"), "url"
+        return None, "unset"
+
 
 def _lazy_default(module_path: str, class_name: str) -> Any:
     """Deferred import helper for ToolsConfig default factories."""
@@ -332,6 +351,7 @@ class ToolsConfig(Base):
         default_factory=lambda: _lazy_default("nanobot.agent.tools.image_generation", "ImageGenerationToolConfig"),
     )
     restrict_to_workspace: bool = False  # policy intent: keep tool access inside workspace when possible
+    extra_allowed_dirs: list[str] = Field(default_factory=list)
     webui_allow_local_service_access: bool = Field(
         default=True,
         validation_alias=AliasChoices(
@@ -394,6 +414,76 @@ class Config(BaseSettings):
         if name not in self.model_presets:
             raise KeyError(f"model_preset {name!r} not found in model_presets")
         return self.model_presets[name]
+
+    def validate_runtime_profile(self, profile: "RuntimeProfile") -> None:
+        """Fail before startup when configured components are unavailable."""
+        from nanobot.providers.registry import find_by_name
+        from nanobot.runtime_profile import RuntimeProfileError
+
+        if profile.channels is not None:
+            extra_channels = self.channels.model_extra or {}
+            unavailable = sorted(
+                name
+                for name, section in extra_channels.items()
+                if (
+                    section.get("enabled", False)
+                    if isinstance(section, dict)
+                    else getattr(section, "enabled", False)
+                )
+                and name not in profile.channels
+            )
+            if unavailable:
+                if len(unavailable) == 1:
+                    detail = f"Channel '{unavailable[0]}' is"
+                else:
+                    names = ", ".join(f"'{name}'" for name in unavailable)
+                    detail = f"Channels {names} are"
+                raise RuntimeProfileError(
+                    f"{detail} not available in runtime profile '{profile.name}'"
+                )
+
+        if profile.providers is not None:
+            presets = [self.resolve_preset()]
+            for fallback in self.agents.defaults.fallback_models:
+                presets.append(
+                    self.model_presets[fallback]
+                    if isinstance(fallback, str)
+                    else ModelPresetConfig(
+                        model=fallback.model,
+                        provider=fallback.provider,
+                        max_tokens=fallback.max_tokens or self.agents.defaults.max_tokens,
+                        context_window_tokens=(
+                            fallback.context_window_tokens
+                            or self.agents.defaults.context_window_tokens
+                        ),
+                        temperature=(
+                            fallback.temperature
+                            if fallback.temperature is not None
+                            else self.agents.defaults.temperature
+                        ),
+                        reasoning_effort=fallback.reasoning_effort,
+                    )
+                )
+            for preset in presets:
+                provider_name = self.get_provider_name(preset.model, preset=preset)
+                if not provider_name:
+                    continue
+                capability = provider_name if find_by_name(provider_name) else "custom"
+                if capability not in profile.providers:
+                    raise RuntimeProfileError(
+                        f"Provider '{provider_name}' is not available in runtime profile "
+                        f"'{profile.name}'"
+                    )
+
+        profile.validate_tools_config(self.tools)
+        if not profile.allow_stdio_mcp:
+            for name, server in self.tools.mcp_servers.items():
+                transport, source = server.resolve_transport()
+                if transport == "stdio":
+                    raise RuntimeProfileError(
+                        f"MCP server '{name}' uses {source}, which is not available in "
+                        f"runtime profile '{profile.name}'"
+                    )
 
     @property
     def workspace_path(self) -> Path:

@@ -7,6 +7,7 @@ from nanobot.config.loader import (
     load_config,
     resolve_config_env_vars,
     save_config,
+    update_config_model_preset,
 )
 
 
@@ -123,3 +124,23 @@ class TestResolveConfig:
 
         assert resolved.providers.groq.api_key == "resolved-key"
         assert resolved.providers.openai_codex.api_key == "secret"
+
+
+def test_update_config_model_preset_preserves_raw_document_and_creates_parents(
+    tmp_path,
+) -> None:
+    config_path = tmp_path / "config.json"
+    original = {
+        "providers": {"gemini": {"apiKey": "${GEMINI_API_KEY}"}},
+        "modelPresets": {"custom": {"model": "openai/custom"}},
+        "unknownSentinel": {"nested": [1, "two"]},
+    }
+    config_path.write_text(json.dumps(original), encoding="utf-8")
+
+    update_config_model_preset("studio-35-flash", config_path)
+
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert saved == {
+        **original,
+        "agents": {"defaults": {"modelPreset": "studio-35-flash"}},
+    }

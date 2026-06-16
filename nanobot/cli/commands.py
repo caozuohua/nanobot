@@ -7,6 +7,7 @@ import signal
 import sys
 from collections.abc import Callable
 from contextlib import nullcontext, suppress
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -576,7 +577,13 @@ def _model_display(config: Config) -> tuple[str, str]:
     return resolved.model, tag
 
 
-def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
+def _load_runtime_config(
+    config: str | None = None,
+    workspace: str | None = None,
+    *,
+    resolve_env: bool = True,
+    defer_model_preset_validation: bool = False,
+) -> Config:
     """Load config and optionally override the active workspace."""
     from nanobot.config.loader import load_config, resolve_config_env_vars, set_config_path
 
@@ -590,7 +597,15 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
         console.print(f"[dim]Using config: {config_path}[/dim]")
 
     try:
-        loaded = resolve_config_env_vars(load_config(config_path))
+        if defer_model_preset_validation:
+            loaded = load_config(
+                config_path,
+                defer_model_preset_validation=True,
+            )
+        else:
+            loaded = load_config(config_path)
+        if resolve_env:
+            loaded = resolve_config_env_vars(loaded)
     except ValueError as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
@@ -701,7 +716,7 @@ def serve(
         await agent_loop._connect_mcp()
 
     async def on_cleanup(_app):
-        await agent_loop.close_mcp()
+        await agent_loop.stop()
 
     api_app.on_startup.append(on_startup)
     api_app.on_cleanup.append(on_cleanup)
@@ -720,6 +735,7 @@ def gateway(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    profile: str | None = typer.Option(None, "--profile", help="Runtime profile"),
 ):
     """Start the nanobot gateway."""
     if verbose:
@@ -736,14 +752,40 @@ def gateway(
             colorize=None,
             filter=lambda record: record["extra"].setdefault("channel", "-") or True,
         )
-    cfg = _load_runtime_config(config, workspace)
-    _run_gateway(cfg, port=port)
+    from nanobot.runtime_profile import RuntimeProfileError, resolve_runtime_profile
+
+    try:
+        runtime_profile = resolve_runtime_profile(profile)
+        cfg = _load_runtime_config(
+            config,
+            workspace,
+            resolve_env=False,
+            defer_model_preset_validation=runtime_profile.is_lite,
+        )
+        validation_selection = None
+        if runtime_profile.is_lite:
+            from nanobot.agent.vps_model_catalog import (
+                install_vps_model_catalog,
+                recover_vps_model_selection,
+            )
+
+            install_vps_model_catalog(cfg)
+            validation_selection = cfg.agents.defaults.model_preset
+            recover_vps_model_selection(cfg, validation_selection)
+        cfg.validate_runtime_profile(runtime_profile)
+        if validation_selection is not None:
+            cfg.agents.defaults.model_preset = validation_selection
+    except (RuntimeProfileError, ValueError) as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        raise typer.Exit(1) from exc
+    _run_gateway(cfg, port=port, profile=runtime_profile)
 
 
 def _run_gateway(
     config: Config,
     *,
     port: int | None = None,
+    profile: Any = None,
     open_browser_url: str | None = None,
     webui_static_dist: bool = True,
     webui_runtime_surface: str = "browser",
@@ -755,16 +797,45 @@ def _run_gateway(
     from nanobot.bus.queue import MessageBus
     from nanobot.bus.runtime_events import RuntimeEventBus
     from nanobot.channels.manager import ChannelManager
-    from nanobot.cron.bound_runner import run_bound_cron_job
+    from nanobot.config.loader import resolve_config_env_vars
     from nanobot.cron.service import CronJobSkippedError, CronService
     from nanobot.cron.session_turns import is_bound_cron_job
     from nanobot.cron.types import CronJob
     from nanobot.providers.factory import build_provider_snapshot, load_provider_snapshot
-    from nanobot.providers.image_generation import image_gen_provider_configs
+    from nanobot.runtime_profile import FULL_PROFILE
     from nanobot.session.manager import SessionManager
-    from nanobot.session.webui_turns import WebuiTurnCoordinator
-    from nanobot.webui.token_usage import TokenUsageHook
 
+    runtime_profile = profile or FULL_PROFILE
+    is_lite = runtime_profile.is_lite
+    model_selection_path = config.workspace_path / ".runtime" / "model-selection.json"
+    if is_lite:
+        from nanobot.agent.model_selection import load_model_selection, save_model_selection
+        from nanobot.agent.vps_model_catalog import (
+            install_vps_model_catalog,
+            load_vps_provider_snapshot,
+            recover_vps_model_selection,
+            validate_vps_model_selection,
+        )
+        from nanobot.config.loader import update_config_model_preset
+
+        install_vps_model_catalog(config)
+        selected_preset = load_model_selection(model_selection_path)
+        effective_preset = selected_preset or config.agents.defaults.model_preset
+        recovery = recover_vps_model_selection(config, effective_preset)
+        if recovery:
+            old_preset, new_preset = recovery
+            update_config_model_preset(new_preset)
+            save_model_selection(model_selection_path, new_preset)
+            logger.warning(
+                "VPS Lite recovered disabled Vertex model selection "
+                f"from {old_preset!r} to {new_preset!r}"
+            )
+        validate_vps_model_selection(config, config.agents.defaults.model_preset)
+    try:
+        config = resolve_config_env_vars(config)
+    except ValueError as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        raise typer.Exit(1) from exc
     port = port if port is not None else config.gateway.port
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
@@ -772,7 +843,11 @@ def _run_gateway(
     bus = MessageBus()
     runtime_events = RuntimeEventBus()
     try:
-        provider_snapshot = build_provider_snapshot(config)
+        provider_snapshot = (
+            build_provider_snapshot(config, profile=runtime_profile)
+            if is_lite
+            else build_provider_snapshot(config)
+        )
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
         raise typer.Exit(1) from exc
@@ -786,6 +861,18 @@ def _run_gateway(
     cron_store_path = config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
+    hooks = []
+    image_generation_configs = {}
+    provider_snapshot_loader = load_provider_snapshot
+    if not is_lite:
+        from nanobot.providers.image_generation import image_gen_provider_configs
+        from nanobot.webui.token_usage import TokenUsageHook
+
+        hooks.append(TokenUsageHook(timezone_name=config.agents.defaults.timezone))
+        image_generation_configs = image_gen_provider_configs(config)
+    else:
+        provider_snapshot_loader = load_vps_provider_snapshot
+
     # Create agent with cron service
     agent = AgentLoop.from_config(
         config, bus,
@@ -794,17 +881,24 @@ def _run_gateway(
         context_window_tokens=provider_snapshot.context_window_tokens,
         cron_service=cron,
         session_manager=session_manager,
-        image_generation_provider_configs=image_gen_provider_configs(config),
-        provider_snapshot_loader=load_provider_snapshot,
+        image_generation_provider_configs=image_generation_configs,
+        provider_snapshot_loader=provider_snapshot_loader,
         runtime_events=runtime_events,
         provider_signature=provider_snapshot.signature,
-        hooks=[TokenUsageHook(timezone_name=config.agents.defaults.timezone)],
+        hooks=hooks,
+        profile=runtime_profile,
+        model_selection_persister=(
+            partial(save_model_selection, model_selection_path) if is_lite else None
+        ),
     )
-    WebuiTurnCoordinator(
-        bus=bus,
-        sessions=session_manager,
-        schedule_background=lambda coro: agent._schedule_background(coro),
-    ).subscribe(runtime_events)
+    if not is_lite:
+        from nanobot.session.webui_turns import WebuiTurnCoordinator
+
+        WebuiTurnCoordinator(
+            bus=bus,
+            sessions=session_manager,
+            schedule_background=lambda coro: agent._schedule_background(coro),
+        ).subscribe(runtime_events)
 
     from nanobot.bus.events import OutboundMessage
     from nanobot.session.keys import session_key_for_channel
@@ -852,6 +946,92 @@ def _run_gateway(
     if isinstance(message_tool, MessageTool):
         message_tool.set_send_callback(_deliver_to_channel)
 
+    async def _run_lite_bound_cron_job(job: CronJob) -> str | None:
+        import hashlib
+        import time
+        import uuid
+
+        from nanobot.agent.tools.cron import CronTool
+        from nanobot.bus.events import InboundMessage
+        from nanobot.cron.session_delivery import origin_delivery_context
+        from nanobot.cron.session_turns import (
+            CRON_DEFER_UNTIL_IDLE_META,
+            CRON_TRIGGER_META,
+        )
+        from nanobot.utils.prompt_templates import render_template
+
+        session_key = job.payload.session_key
+        if not session_key:
+            raise ValueError(f"cron job {job.id} is missing payload.session_key")
+
+        prompt = render_template(
+            "agent/cron_reminder.md",
+            strip=True,
+            message=job.payload.message,
+        )
+        prompt_ref = {
+            "id": "cron.agent_turn.reminder",
+            "version": 1,
+            "sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+        }
+        run_id = f"{job.id}:{int(time.time() * 1000)}:{uuid.uuid4().hex[:8]}"
+        channel, chat_id, metadata = origin_delivery_context(job)
+        metadata[CRON_TRIGGER_META] = {
+            "job_id": job.id,
+            "job_name": job.name,
+            "run_id": run_id,
+            "prompt_ref": prompt_ref,
+            "persist_content": (
+                f"Scheduled cron job triggered: {job.name}\n\n{job.payload.message}"
+            ),
+        }
+        metadata[CRON_DEFER_UNTIL_IDLE_META] = True
+        run_record = {
+            "job_id": job.id,
+            "job_name": job.name,
+            "session_key": session_key,
+            "prompt_ref": prompt_ref,
+            "prompt_vars": {"message": job.payload.message},
+            "rendered_prompt": prompt,
+        }
+        cron.write_run_record(run_id, {**run_record, "status": "queued"})
+
+        cron_tool = agent.tools.get("cron")
+        cron_token = None
+        if isinstance(cron_tool, CronTool):
+            cron_token = cron_tool.set_cron_context(True)
+        try:
+            response = await agent.submit_cron_turn(
+                InboundMessage(
+                    channel=channel,
+                    sender_id="cron",
+                    chat_id=chat_id,
+                    content=prompt,
+                    metadata=metadata,
+                    session_key_override=session_key,
+                )
+            )
+        except (Exception, asyncio.CancelledError) as exc:
+            cron.write_run_record(
+                run_id,
+                {
+                    **run_record,
+                    "status": "error",
+                    "error": str(exc) or exc.__class__.__name__,
+                },
+            )
+            raise
+        finally:
+            if isinstance(cron_tool, CronTool) and cron_token is not None:
+                cron_tool.reset_cron_context(cron_token)
+
+        content = response.content if response else ""
+        cron.write_run_record(
+            run_id,
+            {**run_record, "status": "ok", "response": content},
+        )
+        return content
+
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
@@ -893,13 +1073,14 @@ def _run_gateway(
             except Exception:
                 logger.exception("Dream cron job failed")
             finally:
-                from nanobot.webui.token_usage import record_response_token_usage
+                if not is_lite:
+                    from nanobot.webui.token_usage import record_response_token_usage
 
-                record_response_token_usage(
-                    resp,
-                    source="dream",
-                    timezone_name=config.agents.defaults.timezone,
-                )
+                    record_response_token_usage(
+                        resp,
+                        source="dream",
+                        timezone_name=config.agents.defaults.timezone,
+                    )
                 if store.git.is_initialized():
                     msg = build_dream_commit_message(
                         "dream: periodic memory consolidation", resp,
@@ -962,6 +1143,7 @@ def _run_gateway(
             should_notify = await evaluate_response(
                 response, prompt, agent.provider, agent.model,
                 default_notify=False,
+                llm_turn_gate=agent._llm_turn_gate,
             )
             if should_notify:
                 logger.info("Heartbeat: completed, delivering response")
@@ -974,6 +1156,10 @@ def _run_gateway(
             return response
 
         if is_bound_cron_job(job):
+            if is_lite:
+                return await _run_lite_bound_cron_job(job)
+            from nanobot.cron.bound_runner import run_bound_cron_job
+
             return await run_bound_cron_job(job, agent=agent, cron=cron)
 
         reason = "unbound agent cron job must be recreated from a chat session"
@@ -994,19 +1180,23 @@ def _run_gateway(
             return stripped or None
         return None
 
-    # Create channel manager (forwards SessionManager so the WebSocket channel
-    # can serve the embedded webui's REST surface).
-    channels = ChannelManager(
-        config,
-        bus,
-        session_manager=session_manager,
-        cron_service=cron,
-        webui_runtime_model_name=_webui_runtime_model_name,
-        webui_cron_pending_job_ids=getattr(agent, "pending_cron_job_ids_for_session", None),
-        webui_static_dist=webui_static_dist,
-        webui_runtime_surface=webui_runtime_surface,
-        webui_runtime_capabilities=webui_runtime_capabilities,
-    )
+    if is_lite:
+        channels = ChannelManager(config, bus, runtime_profile=runtime_profile)
+    else:
+        # Forward SessionManager so the WebSocket channel can serve the
+        # embedded webui's REST surface.
+        channels = ChannelManager(
+            config,
+            bus,
+            session_manager=session_manager,
+            cron_service=cron,
+            webui_runtime_model_name=_webui_runtime_model_name,
+            webui_cron_pending_job_ids=getattr(agent, "pending_cron_job_ids_for_session", None),
+            webui_static_dist=webui_static_dist,
+            webui_runtime_surface=webui_runtime_surface,
+            webui_runtime_capabilities=webui_runtime_capabilities,
+            runtime_profile=runtime_profile,
+        )
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
@@ -1136,7 +1326,7 @@ def _run_gateway(
                 agent.run(),
                 channels.start_all(),
             ]
-            if health_server_enabled:
+            if health_server_enabled and not is_lite:
                 tasks.append(_health_server(config.gateway.host, port))
             if open_browser_url:
                 tasks.append(_open_browser_when_ready())
@@ -1149,9 +1339,8 @@ def _run_gateway(
             console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
             console.print(traceback.format_exc())
         finally:
-            await agent.close_mcp()
+            await agent.stop()
             cron.stop()
-            agent.stop()
             await channels.stop_all()
             # Flush all cached sessions to durable storage before exit.
             # This prevents data loss on filesystems with write-back
@@ -1257,24 +1446,26 @@ def agent(
                 bot_name=config.agents.defaults.bot_name,
                 bot_icon=config.agents.defaults.bot_icon,
             )
-            response = await agent_loop.process_direct(
-                message, session_id,
-                on_progress=_make_progress(renderer),
-                on_stream=renderer.on_delta,
-                on_stream_end=renderer.on_end,
-            )
-            if not renderer.streamed:
-                await renderer.close()
-                print_kwargs: dict[str, Any] = {}
-                if renderer.header_printed:
-                    print_kwargs["show_header"] = False
-                _print_agent_response(
-                    response.content if response else "",
-                    render_markdown=markdown,
-                    metadata=response.metadata if response else None,
-                    **print_kwargs,
+            try:
+                response = await agent_loop.process_direct(
+                    message, session_id,
+                    on_progress=_make_progress(renderer),
+                    on_stream=renderer.on_delta,
+                    on_stream_end=renderer.on_end,
                 )
-            await agent_loop.close_mcp()
+                if not renderer.streamed:
+                    await renderer.close()
+                    print_kwargs: dict[str, Any] = {}
+                    if renderer.header_printed:
+                        print_kwargs["show_header"] = False
+                    _print_agent_response(
+                        response.content if response else "",
+                        render_markdown=markdown,
+                        metadata=response.metadata if response else None,
+                        **print_kwargs,
+                    )
+            finally:
+                await agent_loop.stop()
 
         asyncio.run(run_once())
     else:
@@ -1420,10 +1611,9 @@ def agent(
                         console.print("\nGoodbye!")
                         break
             finally:
-                agent_loop.stop()
+                await agent_loop.stop()
                 outbound_task.cancel()
                 await asyncio.gather(bus_task, outbound_task, return_exceptions=True)
-                await agent_loop.close_mcp()
 
         asyncio.run(run_interactive())
 

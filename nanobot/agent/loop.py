@@ -63,7 +63,7 @@ from nanobot.utils.document import extract_documents, reference_non_image_attach
 from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
 from nanobot.utils.image_generation_intent import image_generation_prompt
-from nanobot.utils.llm_runtime import LLMRuntime
+from nanobot.utils.llm_runtime import LLMRuntime, LLMTurnGate
 from nanobot.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
     SUSTAINED_GOAL_CONTINUE_PROMPT,
@@ -159,10 +159,10 @@ class AgentLoop:
     def tool_names(self) -> list[str]:
         return self.tools.tool_names
 
-    def llm_runtime(self) -> LLMRuntime:
+    async def llm_runtime(self) -> LLMRuntime:
         """Return the current provider/model pair owned by this loop."""
-        self._refresh_provider_snapshot()
-        return LLMRuntime(self.provider, self.model)
+        await self._refresh_provider_snapshot()
+        return LLMRuntime(self.provider, self.model, self._llm_turn_gate)
 
     _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
     _PENDING_USER_TURN_KEY = "pending_user_turn"
@@ -215,6 +215,7 @@ class AgentLoop:
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
         runtime_events: RuntimeEventBus | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
+        model_selection_persister: Callable[[str], None] | None = None,
         profile: RuntimeProfile | str | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
@@ -223,6 +224,7 @@ class AgentLoop:
         defaults = AgentDefaults()
         self.bus = bus
         self.runtime_events = runtime_events or RuntimeEventBus()
+        self.model_selection_persister = model_selection_persister
         self.runtime_event_publisher = RuntimeEventPublisher(self.runtime_events)
         self.channels_config = channels_config
         self.provider = provider
@@ -230,6 +232,9 @@ class AgentLoop:
         self._preset_snapshot_loader = preset_snapshot_loader
         self._runtime_model_publisher = runtime_model_publisher
         self._provider_signature = provider_signature
+        self._closed_provider_ids: set[int] = set()
+        self._provider_close_tasks: dict[int, asyncio.Task[None]] = {}
+        self._llm_turn_gate = LLMTurnGate()
         self._default_selection_signature = preset_helpers.default_selection_signature(provider_signature)
         self.workspace = workspace
         self.model = model or provider.get_default_model()
@@ -283,7 +288,7 @@ class AgentLoop:
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.
         self._file_state_store = FileStateStore()
-        self.runner = AgentRunner(provider)
+        self.runner = AgentRunner(provider, llm_turn_gate=self._llm_turn_gate)
         self.subagents = SubagentManager(
             provider=provider,
             workspace=workspace,
@@ -297,6 +302,7 @@ class AgentLoop:
             max_iterations=self.max_iterations,
             max_concurrent_subagents=max_concurrent_subagents,
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
+            llm_turn_gate=self._llm_turn_gate,
         )
         self._unified_session = unified_session
         self._max_messages = max_messages if max_messages > 0 else 120
@@ -333,6 +339,7 @@ class AgentLoop:
             max_completion_tokens=provider.generation.max_tokens,
             consolidation_ratio=consolidation_ratio,
             unified_session=unified_session,
+            llm_turn_gate=self._llm_turn_gate,
         )
         self.auto_compact = AutoCompact(
             sessions=self.sessions,
@@ -340,9 +347,7 @@ class AgentLoop:
             session_ttl_minutes=session_ttl_minutes,
         )
         self.model_presets: dict[str, ModelPresetConfig] = model_presets or {}
-        self._active_preset: str | None = None
-        if model_preset:
-            self.set_model_preset(model_preset, publish_update=False)
+        self._active_preset = model_preset
         self._register_default_tools()
         self._runtime_vars: dict[str, Any] = {}
         self._current_iteration: int = 0
@@ -367,12 +372,18 @@ class AgentLoop:
         if bus is None:
             bus = MessageBus()
         defaults = config.agents.defaults
-        provider = extra.pop("provider", None) or make_provider(config)
         profile = extra.pop("profile", None)
         if profile is None:
             profile = extra.pop("runtime_profile", None)
         else:
             extra.pop("runtime_profile", None)
+        provider = extra.pop("provider", None)
+        if provider is None:
+            provider = (
+                make_provider(config, profile=profile)
+                if profile is not None
+                else make_provider(config)
+            )
         resolved = config.resolve_preset()
         model = extra.pop("model", None) or resolved.model
         context_window_tokens = extra.pop("context_window_tokens", None) or resolved.context_window_tokens
@@ -446,7 +457,7 @@ class AgentLoop:
             )
         logger.info("Runtime model switched for next turn: {} -> {}", old_model, model)
 
-    def _refresh_provider_snapshot(self) -> None:
+    async def _refresh_provider_snapshot(self) -> None:
         if self._provider_snapshot_loader is None:
             return
         try:
@@ -456,19 +467,32 @@ class AgentLoop:
             return
         default_selection = preset_helpers.default_selection_signature(snapshot.signature)
         if self._active_preset and self._default_selection_signature in (None, default_selection):
-            self._default_selection_signature = default_selection
             try:
-                snapshot = self._build_model_preset_snapshot(self._active_preset)
+                preset_snapshot = self._build_model_preset_snapshot(self._active_preset)
             except Exception:
+                if snapshot.provider is not self.provider:
+                    await self._close_provider_once(snapshot.provider, description="candidate")
                 logger.exception("Failed to refresh active model preset")
                 return
+            if snapshot.provider is not self.provider and snapshot.provider is not preset_snapshot.provider:
+                await self._close_provider_once(snapshot.provider, description="candidate")
+            snapshot = preset_snapshot
+            next_active_preset = self._active_preset
         else:
-            self._active_preset = None
-            self._default_selection_signature = default_selection
+            next_active_preset = None
         if snapshot.signature == self._provider_signature:
+            if snapshot.provider is not self.provider:
+                await self._close_provider_once(snapshot.provider, description="candidate")
+            self._active_preset = next_active_preset
+            self._default_selection_signature = default_selection
             return
+        try:
+            await self._replace_provider_snapshot(snapshot)
+        except Exception:
+            logger.exception("Failed to apply refreshed provider config")
+            return
+        self._active_preset = next_active_preset
         self._default_selection_signature = preset_helpers.default_selection_signature(snapshot.signature)
-        self._apply_provider_snapshot(snapshot)
 
     @property
     def model_preset(self) -> str | None:
@@ -476,7 +500,15 @@ class AgentLoop:
 
     @model_preset.setter
     def model_preset(self, name: str | None) -> None:
-        self.set_model_preset(name)
+        """Apply in-place presets used by synchronous runtime-state tools."""
+        name = preset_helpers.normalize_preset_name(name, self.model_presets)
+        if self._preset_snapshot_loader is not None or self._llm_turn_gate.lock.locked():
+            raise RuntimeError("provider-changing model presets must be awaited")
+        snapshot = self._build_model_preset_snapshot(name)
+        if snapshot.provider is not self.provider:
+            raise RuntimeError("provider-changing model presets must be awaited")
+        self._apply_provider_snapshot(snapshot, model_preset=name)
+        self._active_preset = name
 
     def _build_model_preset_snapshot(self, name: str) -> ProviderSnapshot:
         return preset_helpers.build_runtime_preset_snapshot(
@@ -486,11 +518,104 @@ class AgentLoop:
             loader=self._preset_snapshot_loader,
         )
 
-    def set_model_preset(self, name: str | None, *, publish_update: bool = True) -> None:
+    async def _close_provider_once(self, provider: Any, *, description: str) -> None:
+        provider_id = id(provider)
+        if provider_id in self._closed_provider_ids:
+            return
+        close_task = self._provider_close_tasks.get(provider_id)
+        if close_task is None:
+            close_task = asyncio.create_task(
+                self._finish_provider_close(provider, description=description),
+            )
+            self._provider_close_tasks[provider_id] = close_task
+        await asyncio.shield(close_task)
+
+    async def _finish_provider_close(self, provider: Any, *, description: str) -> None:
+        provider_id = id(provider)
+        try:
+            await provider.aclose()
+        except Exception:
+            logger.exception("Failed to close {} provider", description)
+        else:
+            self._closed_provider_ids.add(provider_id)
+        finally:
+            self._provider_close_tasks.pop(provider_id, None)
+
+    async def _replace_provider_snapshot(
+        self,
+        snapshot: ProviderSnapshot,
+        *,
+        publish_update: bool = True,
+        model_preset: str | None = None,
+    ) -> None:
+        try:
+            async with self._llm_turn_gate.hold():
+                await self._replace_provider_snapshot_locked(
+                    snapshot,
+                    publish_update=publish_update,
+                    model_preset=model_preset,
+                )
+        except BaseException:
+            if snapshot.provider is not self.provider:
+                await self._close_provider_once(snapshot.provider, description="candidate")
+            raise
+
+    async def _replace_provider_snapshot_locked(
+        self,
+        snapshot: ProviderSnapshot,
+        *,
+        publish_update: bool,
+        model_preset: str | None,
+    ) -> None:
+        old_provider = self.provider
+        old_model = self.model
+        old_context_window_tokens = self.context_window_tokens
+        old_signature = self._provider_signature
+        try:
+            self._apply_provider_snapshot(
+                snapshot,
+                publish_update=publish_update,
+                model_preset=model_preset,
+            )
+        except Exception:
+            self.provider = old_provider
+            self.model = old_model
+            self.context_window_tokens = old_context_window_tokens
+            self.runner.provider = old_provider
+            self._provider_signature = old_signature
+            try:
+                self.subagents.set_provider(old_provider, old_model)
+            except Exception:
+                logger.exception("Failed to restore subagent provider after switch failure")
+            try:
+                self.consolidator.set_provider(
+                    old_provider,
+                    old_model,
+                    old_context_window_tokens,
+                )
+            except Exception:
+                logger.exception("Failed to restore consolidator provider after switch failure")
+            finally:
+                if snapshot.provider is not old_provider:
+                    await self._close_provider_once(snapshot.provider, description="candidate")
+            raise
+        if old_provider is not snapshot.provider:
+            await self._close_provider_once(old_provider, description="replaced")
+
+    async def set_model_preset(
+        self,
+        name: str | None,
+        *,
+        publish_update: bool = True,
+    ) -> None:
         """Resolve a preset by name and apply all runtime model dependents."""
         name = preset_helpers.normalize_preset_name(name, self.model_presets)
         snapshot = self._build_model_preset_snapshot(name)
-        self._apply_provider_snapshot(snapshot, publish_update=publish_update, model_preset=name)
+        await self._replace_provider_snapshot(
+            snapshot,
+            publish_update=publish_update,
+            model_preset=name,
+        )
         self._active_preset = name
 
     def _register_default_tools(self) -> None:
@@ -992,6 +1117,10 @@ class AgentLoop:
                             return f"{stream_base_id}:{stream_segment}"
 
                         async def on_stream(delta: str) -> None:
+                            if not delta:
+                                return
+                            setattr(on_stream, "_segment_emitted", True)
+                            setattr(on_stream, "_ever_emitted", True)
                             meta = dict(msg.metadata or {})
                             meta["_stream_delta"] = True
                             meta["_stream_id"] = _current_stream_id()
@@ -1003,6 +1132,8 @@ class AgentLoop:
 
                         async def on_stream_end(*, resuming: bool = False) -> None:
                             nonlocal stream_segment
+                            if not getattr(on_stream, "_segment_emitted", False):
+                                return
                             meta = dict(msg.metadata or {})
                             meta["_stream_end"] = True
                             meta["_resuming"] = resuming
@@ -1013,6 +1144,7 @@ class AgentLoop:
                                 metadata=meta,
                             ))
                             stream_segment += 1
+                            setattr(on_stream, "_segment_emitted", False)
 
                     response = await self._process_message(
                         msg, on_stream=on_stream, on_stream_end=on_stream_end,
@@ -1139,9 +1271,21 @@ class AgentLoop:
         self._background_tasks.append(task)
         task.add_done_callback(self._background_tasks.remove)
 
-    def stop(self) -> None:
+    async def stop(self) -> None:
         """Stop the agent loop."""
         self._running = False
+        try:
+            await self.subagents.cancel_all()
+        except Exception:
+            logger.exception("Failed to stop subagents during shutdown")
+        finally:
+            try:
+                await self.close_mcp()
+            except Exception:
+                logger.exception("Failed to close MCP resources during shutdown")
+            finally:
+                async with self._llm_turn_gate.hold():
+                    await self._close_provider_once(self.provider, description="active")
         logger.info("Agent loop stopping")
 
     async def _process_system_message(
@@ -1254,7 +1398,8 @@ class AgentLoop:
         tools: ToolRegistry | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
-        self._refresh_provider_snapshot()
+        if not ephemeral:
+            await self._refresh_provider_snapshot()
 
         if msg.channel == "system":
             return await self._process_system_message(
@@ -1361,7 +1506,11 @@ class AgentLoop:
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         meta = dict(msg.metadata or {})
-        if on_stream is not None and stop_reason not in {"error", "tool_error"}:
+        if (
+            on_stream is not None
+            and getattr(on_stream, "_ever_emitted", False)
+            and stop_reason not in {"error", "tool_error"}
+        ):
             meta["_streamed"] = True
         if turn_latency_ms is not None:
             meta["latency_ms"] = int(turn_latency_ms)
@@ -1464,7 +1613,7 @@ class AgentLoop:
         ctx.history = ctx.session.get_history(**_hist_kwargs)
         self._runtime_events().record_turn_runtime(
             ctx.session_key,
-            self.llm_runtime(),
+            LLMRuntime(self.provider, self.model, self._llm_turn_gate),
         )
 
         ctx.initial_messages = self._build_initial_messages(

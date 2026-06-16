@@ -849,7 +849,9 @@ def mock_agent_runtime(tmp_path):
         agent_loop.process_direct = AsyncMock(
             return_value=OutboundMessage(channel="cli", chat_id="direct", content="mock-response"),
         )
+        agent_loop.run = AsyncMock(return_value=None)
         agent_loop.close_mcp = AsyncMock(return_value=None)
+        agent_loop.stop = AsyncMock(return_value=None)
         mock_from_config.return_value = agent_loop
 
         yield {
@@ -884,9 +886,28 @@ def test_agent_uses_default_config_when_no_workspace_or_config_flags(mock_agent_
     passed_config = mock_agent_runtime["from_config"].call_args.args[0]
     assert passed_config.workspace_path == mock_agent_runtime["config"].workspace_path
     mock_agent_runtime["agent_loop"].process_direct.assert_awaited_once()
+    mock_agent_runtime["agent_loop"].close_mcp.assert_not_awaited()
+    mock_agent_runtime["agent_loop"].stop.assert_awaited_once_with()
     mock_agent_runtime["print_response"].assert_called_once_with(
         "mock-response", render_markdown=True, metadata={},
     )
+
+
+def test_interactive_agent_exit_stops_loop_without_direct_mcp_cleanup(
+    mock_agent_runtime,
+    monkeypatch,
+):
+    monkeypatch.setattr("nanobot.cli.commands._init_prompt_session", lambda: None)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._read_interactive_input_async",
+        AsyncMock(return_value="exit"),
+    )
+
+    result = runner.invoke(app, ["agent"])
+
+    assert result.exit_code == 0
+    mock_agent_runtime["agent_loop"].close_mcp.assert_not_awaited()
+    mock_agent_runtime["agent_loop"].stop.assert_awaited_once_with()
 
 
 def test_agent_uses_explicit_config_path(mock_agent_runtime, tmp_path: Path):
@@ -930,6 +951,9 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
         async def close_mcp(self) -> None:
             return None
 
+        async def stop(self) -> None:
+            return None
+
     monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
 
@@ -969,6 +993,9 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
             return OutboundMessage(channel="cli", chat_id="direct", content="ok")
 
         async def close_mcp(self) -> None:
+            return None
+
+        async def stop(self) -> None:
             return None
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
@@ -1019,6 +1046,9 @@ def test_agent_workspace_override_does_not_migrate_legacy_cron(
             return OutboundMessage(channel="cli", chat_id="direct", content="ok")
 
         async def close_mcp(self) -> None:
+            return None
+
+        async def stop(self) -> None:
             return None
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
@@ -1075,6 +1105,9 @@ def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
             return OutboundMessage(channel="cli", chat_id="direct", content="ok")
 
         async def close_mcp(self) -> None:
+            return None
+
+        async def stop(self) -> None:
             return None
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
@@ -1251,7 +1284,10 @@ def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -
             return None
 
         async def close_mcp(self) -> None:
-            return None
+            seen["close_mcp_calls"] = int(seen.get("close_mcp_calls", 0)) + 1
+
+        async def stop(self) -> None:
+            seen["stop_calls"] = int(seen.get("stop_calls", 0)) + 1
 
     def _fake_create_app(agent_loop, model_name: str, request_timeout: float):
         seen["agent_loop"] = agent_loop
@@ -1263,6 +1299,8 @@ def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -
         seen["api_app"] = api_app
         seen["host"] = host
         seen["port"] = port
+        for cleanup in api_app.on_cleanup:
+            asyncio.run(cleanup(api_app))
 
     _patch_cli_command_runtime(
         monkeypatch,
@@ -1421,7 +1459,7 @@ def test_gateway_unbound_agent_cron_is_skipped(
         async def run(self) -> None:
             return None
 
-        def stop(self) -> None:
+        async def stop(self) -> None:
             return None
 
     class _StopAfterCronSetup:
@@ -1851,7 +1889,7 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
         async def close_mcp(self) -> None:
             return None
 
-        def stop(self) -> None:
+        async def stop(self) -> None:
             return None
 
     class _FakeChannelManager:
@@ -1984,6 +2022,8 @@ def test_serve_uses_api_config_defaults_and_workspace_override(
     assert seen["host"] == "127.0.0.2"
     assert seen["port"] == 18900
     assert seen["request_timeout"] == 45.0
+    assert seen.get("close_mcp_calls", 0) == 0
+    assert seen["stop_calls"] == 1
 
 
 def test_serve_cli_options_override_api_config(monkeypatch, tmp_path: Path) -> None:

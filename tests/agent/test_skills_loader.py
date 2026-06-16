@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.skills import SkillsLoader
-from nanobot.runtime_profile import RuntimeProfile
+from nanobot.runtime_profile import VPS_LITE_PROFILE
 
 
 def _write_skill(
@@ -326,7 +326,7 @@ def test_lite_profile_filters_builtin_skills_but_keeps_workspace_override(tmp_pa
     bi_long = _write_skill(builtin, "long-goal", body="# Builtin long goal")
     bi_cron = _write_skill(builtin, "cron", body="# Builtin cron")
 
-    loader = SkillsLoader(workspace, builtin_skills_dir=builtin, profile=RuntimeProfile.VPS_LITE)
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin, profile=VPS_LITE_PROFILE)
     entries = sorted(loader.list_skills(filter_unavailable=False), key=lambda item: (item["source"], item["name"]))
 
     assert {"name": "my", "path": str(ws_my), "source": "workspace"} in entries

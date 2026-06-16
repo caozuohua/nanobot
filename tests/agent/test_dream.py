@@ -228,6 +228,55 @@ class TestEphemeralDirect:
             )
             mock_consolidate.assert_not_called()
 
+    async def test_ephemeral_reuses_active_provider_without_refresh(
+        self, tmp_path, _make_loop,
+    ):
+        """Dream maintenance must not reload the persisted default provider."""
+        from unittest.mock import MagicMock
+
+        loop, store = _make_loop
+        loader = MagicMock()
+        loop._provider_snapshot_loader = loader
+
+        await loop.process_direct(
+            "test", session_key="dream:active-provider", ephemeral=True,
+        )
+
+        loader.assert_not_called()
+        loop.provider.chat_with_retry.assert_awaited()
+
+    async def test_ephemeral_uses_provider_selected_by_runtime_switch(
+        self, tmp_path, _make_loop,
+    ):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from nanobot.providers.factory import ProviderSnapshot
+
+        loop, store = _make_loop
+        selected = MagicMock()
+        selected.generation = MagicMock(max_tokens=2048)
+        selected.chat_with_retry = AsyncMock(
+            return_value=LLMResponse(content="done", finish_reason="stop"),
+        )
+        loop._apply_provider_snapshot(
+            ProviderSnapshot(
+                provider=selected,
+                model="selected-model",
+                context_window_tokens=16_000,
+                signature=("selected",),
+            ),
+        )
+        loader = MagicMock()
+        loop._provider_snapshot_loader = loader
+
+        await loop.process_direct(
+            "test", session_key="dream:selected-provider", ephemeral=True,
+        )
+
+        loader.assert_not_called()
+        selected.chat_with_retry.assert_awaited()
+        assert loop.model == "selected-model"
+
     async def test_ephemeral_response_reports_stop_reason(self, tmp_path, _make_loop):
         loop, store = _make_loop
         loop.provider.chat_with_retry.return_value = LLMResponse(

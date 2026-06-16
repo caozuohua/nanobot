@@ -37,6 +37,7 @@ from nanobot.utils.helpers import (
     strip_think,
     truncate_text,
 )
+from nanobot.utils.llm_runtime import LLMTurnGate
 from nanobot.utils.progress_events import (
     invoke_file_edit_progress,
     on_progress_accepts_file_edit_events,
@@ -130,8 +131,9 @@ class AgentRunResult:
 class AgentRunner:
     """Run a tool-capable LLM loop without product-layer concerns."""
 
-    def __init__(self, provider: LLMProvider):
+    def __init__(self, provider: LLMProvider, llm_turn_gate: LLMTurnGate | None = None):
         self.provider = provider
+        self._llm_turn_gate = llm_turn_gate or LLMTurnGate()
 
     @staticmethod
     def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
@@ -371,7 +373,9 @@ class AgentRunner:
                 session_key=spec.session_key,
             )
             await hook.before_iteration(context)
-            response = await self._request_model(spec, messages_for_model, hook, context)
+            response = await self._llm_turn_gate.run(
+                lambda: self._request_model(spec, messages_for_model, hook, context)
+            )
             context.response = response
             context.tool_calls = list(response.tool_calls)
 
@@ -892,7 +896,9 @@ class AgentRunner:
         messages: list[dict[str, Any]],
     ) -> LLMResponse:
         kwargs = self._build_request_kwargs(spec, messages, tools=None)
-        return await self.provider.chat_with_retry(**kwargs)
+        return await self._llm_turn_gate.run(
+            lambda: self.provider.chat_with_retry(**kwargs)
+        )
 
     @staticmethod
     def _budget_exhausted_finalization_messages(

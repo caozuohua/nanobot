@@ -34,7 +34,8 @@ class ProviderSpec:
     display_name: str = ""  # shown in `nanobot status`
 
     # which provider implementation to use
-    # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex" | "github_copilot" | "bedrock"
+    # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex" |
+    # "github_copilot" | "bedrock" | "vertex_ai"
     backend: str = "openai_compat"
 
     # extra env vars, e.g. (("ZHIPUAI_API_KEY", "{api_key}"),)
@@ -323,14 +324,23 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://api.deepseek.com",
         thinking_style="thinking_type",
     ),
+    # Vertex AI: native Google Gen AI SDK with ADC authentication.
+    ProviderSpec(
+        name="vertex_ai",
+        keywords=("vertex_ai", "vertex-ai", "vertex"),
+        env_key="",
+        display_name="Vertex AI",
+        backend="vertex_ai",
+        is_direct=True,
+    ),
     # Gemini: Google's OpenAI-compatible endpoint
     ProviderSpec(
         name="gemini",
         keywords=("gemini", "gemma"),
         env_key="GEMINI_API_KEY",
         display_name="Gemini",
-        backend="openai_compat",
-        default_api_base="https://generativelanguage.googleapis.com/v1beta/openai/",
+        backend="google_ai",
+        is_direct=True,
     ),
     # Zhipu (智谱): OpenAI-compatible at open.bigmodel.cn
     ProviderSpec(

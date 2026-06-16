@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -16,6 +17,7 @@ from nanobot.config.loader import save_config
 from nanobot.config.schema import ChannelsConfig, Config
 from nanobot.providers.transcription import GroqTranscriptionProvider as _GroqProvider
 from nanobot.providers.transcription import OpenAITranscriptionProvider as _OpenAIProvider
+from nanobot.runtime_profile import FULL_PROFILE, VPS_LITE_PROFILE
 from nanobot.utils.restart import RestartNotice
 
 # ---------------------------------------------------------------------------
@@ -196,6 +198,58 @@ def test_discover_enabled_imports_only_enabled_builtins():
     assert loaded == ["enabled"]
 
 
+def test_discover_enabled_filters_vps_lite_builtins_before_import():
+    from nanobot.channels.registry import discover_enabled
+
+    loaded: list[str] = []
+
+    def _load_channel(name: str):
+        loaded.append(name)
+        return _FakePlugin
+
+    names = ["websocket", "feishu", "slack", "telegram", "discord"]
+    with (
+        patch("nanobot.channels.registry.load_channel_class", side_effect=_load_channel),
+        patch(_EP_TARGET, side_effect=AssertionError("entry points must not be enumerated")),
+    ):
+        result = discover_enabled(set(names), _names=names, profile=VPS_LITE_PROFILE)
+
+    assert result == {
+        "feishu": _FakePlugin,
+        "telegram": _FakePlugin,
+        "discord": _FakePlugin,
+    }
+    assert loaded == ["feishu", "telegram", "discord"]
+
+
+def test_discover_plugins_does_not_enumerate_entry_points_when_profile_disallows_them():
+    from nanobot.channels.registry import discover_plugins
+
+    with patch(_EP_TARGET, side_effect=AssertionError("entry points must not be enumerated")):
+        assert discover_plugins(profile=VPS_LITE_PROFILE) == {}
+
+
+def test_explicit_full_profile_preserves_default_discovery_behavior():
+    from nanobot.channels.registry import discover_enabled
+
+    ep = _make_entry_point("line", _FakePlugin)
+    with (
+        patch("nanobot.channels.registry.load_channel_class", return_value=_FakeTelegram),
+        patch(_EP_TARGET, return_value=[ep]),
+    ):
+        default = discover_enabled({"telegram", "line"}, _names=["telegram"])
+        explicit_full = discover_enabled(
+            {"telegram", "line"},
+            _names=["telegram"],
+            profile=FULL_PROFILE,
+        )
+
+    assert explicit_full == default == {
+        "telegram": _FakeTelegram,
+        "line": _FakePlugin,
+    }
+
+
 def test_discover_all_builtin_shadows_plugin():
     from nanobot.channels.registry import discover_all
 
@@ -236,6 +290,73 @@ async def test_manager_loads_plugin_from_dict_config():
 
     assert "fakeplugin" in mgr.channels
     assert isinstance(mgr.channels["fakeplugin"], _FakePlugin)
+
+
+@pytest.mark.parametrize("channel_name", ["websocket", "slack", "fakeplugin"])
+def test_manager_rejects_enabled_channel_unavailable_in_profile(channel_name):
+    config = Config.model_validate({
+        "channels": {
+            channel_name: {"enabled": True, "allowFrom": ["*"]},
+        },
+    })
+
+    with pytest.raises(
+        ValueError,
+        match=rf"Channel '{channel_name}' is not available in runtime profile 'vps-lite'",
+    ):
+        ChannelManager(config, MessageBus(), runtime_profile=VPS_LITE_PROFILE)
+
+
+def test_manager_derives_runtime_profile_from_environment(monkeypatch):
+    monkeypatch.setenv("NANOBOT_PROFILE", "vps-lite")
+    config = Config.model_validate({
+        "channels": {
+            "slack": {"enabled": True, "allowFrom": ["*"]},
+        },
+    })
+
+    with pytest.raises(
+        ValueError,
+        match="Channel 'slack' is not available in runtime profile 'vps-lite'",
+    ):
+        ChannelManager(config, MessageBus())
+
+
+def test_manager_vps_lite_path_does_not_touch_webui(monkeypatch):
+    config = Config.model_validate({
+        "channels": {
+            "feishu": {"enabled": True, "allowFrom": ["*"]},
+        },
+    })
+    imported: list[str] = []
+    original_import = builtins.__import__
+
+    def _guarded_import(name, *args, **kwargs):
+        if name in {"nanobot.channels.websocket", "nanobot.webui.gateway_services"}:
+            imported.append(name)
+            raise AssertionError(f"unexpected import: {name}")
+        return original_import(name, *args, **kwargs)
+
+    with (
+        patch(
+            "nanobot.channels.registry.discover_enabled",
+            return_value={"feishu": _FakePlugin},
+        ) as discover,
+        patch(
+            "nanobot.channels.manager._default_webui_dist",
+            side_effect=AssertionError("WebUI path must not be resolved"),
+        ),
+        patch.object(builtins, "__import__", side_effect=_guarded_import),
+    ):
+        manager = ChannelManager(
+            config,
+            MessageBus(),
+            runtime_profile=VPS_LITE_PROFILE,
+        )
+
+    assert list(manager.channels) == ["feishu"]
+    assert imported == []
+    assert discover.call_args.kwargs["profile"] is VPS_LITE_PROFILE
 
 
 @pytest.mark.asyncio

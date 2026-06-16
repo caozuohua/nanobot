@@ -19,7 +19,8 @@ from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.mcp import MCPResourceWrapper, MCPToolWrapper
 from nanobot.bus.queue import MessageBus
 from nanobot.config.loader import load_config, save_config
-from nanobot.config.schema import MCPServerConfig
+from nanobot.config.schema import MCPServerConfig, ToolsConfig
+from nanobot.runtime_profile import VPS_LITE_PROFILE
 
 
 class _FakeMcpTool(Tool):
@@ -42,17 +43,30 @@ class _FakeMcpTool(Tool):
         return "ok"
 
 
-def _make_loop(tmp_path, *, mcp_servers: dict | None = None) -> AgentLoop:
+def _make_loop(
+    tmp_path,
+    *,
+    mcp_servers: dict | None = None,
+    profile: object | None = None,
+    tools_config: ToolsConfig | None = None,
+) -> AgentLoop:
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.generation.max_tokens = 4096
+    config = tools_config or ToolsConfig()
+    if profile is VPS_LITE_PROFILE:
+        config.my.enable = False
+        config.image_generation.enabled = False
+        config.cli_apps.enable = False
     return AgentLoop(
         bus=bus,
         provider=provider,
         workspace=tmp_path,
         model="test-model",
         mcp_servers=mcp_servers or {"test": object()},
+        tools_config=config,
+        profile=profile,
     )
 
 
@@ -61,7 +75,7 @@ async def test_connect_mcp_retries_when_no_servers_connect(tmp_path, monkeypatch
     loop = _make_loop(tmp_path)
     attempts = 0
 
-    async def _fake_connect(_servers, _registry):
+    async def _fake_connect(_servers, _registry, *, profile=None):
         nonlocal attempts
         attempts += 1
         return {}
@@ -74,6 +88,51 @@ async def test_connect_mcp_retries_when_no_servers_connect(tmp_path, monkeypatch
     assert attempts == 2
     assert loop._mcp_connected is False
     assert loop._mcp_stacks == {}
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_threads_runtime_profile_into_mcp_connection(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    loop = _make_loop(tmp_path, profile=VPS_LITE_PROFILE)
+    seen: dict[str, object | None] = {}
+
+    async def _fake_connect(servers, registry, *, profile=None):
+        seen["profile"] = profile
+        return {}
+
+    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", _fake_connect)
+
+    await loop._connect_mcp()
+
+    assert seen["profile"] is VPS_LITE_PROFILE
+
+
+@pytest.mark.asyncio
+async def test_reload_mcp_threads_runtime_profile_into_mcp_connection(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    config = load_config()
+    config.tools.mcp_servers["browserbase"] = MCPServerConfig(
+        type="stdio",
+        command="browserbase-mcp",
+    )
+    save_config(config)
+
+    loop = _make_loop(tmp_path, mcp_servers={}, profile=VPS_LITE_PROFILE)
+    seen: dict[str, object | None] = {}
+
+    async def _fake_connect(servers, registry, *, profile=None):
+        seen["profile"] = profile
+        return {}
+
+    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", _fake_connect)
+
+    await mcp_runtime.reload_servers(loop, loop.tools)
+
+    assert seen["profile"] is VPS_LITE_PROFILE
 
 
 @pytest.mark.asyncio
@@ -95,7 +154,7 @@ async def test_reload_mcp_servers_adds_and_removes_tools_without_restart(
     async def _mark_closed(name: str) -> None:
         closed.append(name)
 
-    async def _fake_connect(servers, registry):
+    async def _fake_connect(servers, registry, *, profile=None):
         stacks = {}
         for name in servers:
             registry.register(_FakeMcpTool(f"mcp_{name}_navigate"))
@@ -147,7 +206,7 @@ async def test_request_mcp_reload_reaches_runtime_control_without_restart(
     async def _mark_closed(name: str) -> None:
         closed.append(name)
 
-    async def _fake_connect(servers, registry):
+    async def _fake_connect(servers, registry, *, profile=None):
         stacks = {}
         for name in servers:
             registry.register(_FakeMcpTool(f"mcp_{name}_navigate"))
@@ -203,7 +262,7 @@ async def test_reload_mcp_servers_retries_configured_server_without_live_stack(
     )
     save_config(config)
 
-    async def _fake_connect(servers, registry):
+    async def _fake_connect(servers, registry, *, profile=None):
         stacks = {}
         for name in servers:
             registry.register(_FakeMcpTool(f"mcp_{name}_navigate"))
@@ -252,7 +311,7 @@ async def test_mcp_tool_reconnects_after_session_terminated(
                 content=[mcp_types.TextContent(type="text", text="recovered")]
             )
 
-    async def _fake_connect(servers, registry):
+    async def _fake_connect(servers, registry, *, profile=None):
         nonlocal connect_count
         stacks = {}
         for name in servers:
@@ -308,7 +367,7 @@ async def test_mcp_reconnect_handler_uses_sanitized_server_prefix(
                 content=[mcp_types.TextContent(type="text", text="recovered")]
             )
 
-    async def _fake_connect(servers, registry):
+    async def _fake_connect(servers, registry, *, profile=None):
         nonlocal connect_count
         stacks = {}
         for name in servers:
@@ -365,7 +424,7 @@ async def test_concurrent_mcp_reconnect_reuses_fresh_session(
                 ]
             )
 
-    async def _fake_connect(servers, registry):
+    async def _fake_connect(servers, registry, *, profile=None):
         nonlocal connect_count
         stacks = {}
         for name in servers:

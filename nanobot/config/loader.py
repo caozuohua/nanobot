@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +30,11 @@ def get_config_path() -> Path:
     return Path.home() / ".nanobot" / "config.json"
 
 
-def load_config(config_path: Path | None = None) -> Config:
+def load_config(
+    config_path: Path | None = None,
+    *,
+    defer_model_preset_validation: bool = False,
+) -> Config:
     """
     Load configuration from file or create default.
 
@@ -52,7 +57,14 @@ def load_config(config_path: Path | None = None) -> Config:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             data = _migrate_config(data)
+            deferred_model_preset = None
+            if defer_model_preset_validation:
+                defaults = data.get("agents", {}).get("defaults", {})
+                if isinstance(defaults, dict):
+                    deferred_model_preset = defaults.pop("modelPreset", None)
             config = Config.model_validate(data)
+            if isinstance(deferred_model_preset, str):
+                config.agents.defaults.model_preset = deferred_model_preset
         except (json.JSONDecodeError, ValueError, pydantic.ValidationError) as e:
             raise ValueError(f"Failed to load config from {path}: {e}") from e
 
@@ -79,9 +91,60 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
     data = config.model_dump(mode="json", by_alias=True)
+    _atomic_write_json(path, data)
 
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+
+def update_config_model_preset(
+    model_preset: str,
+    config_path: Path | None = None,
+) -> None:
+    """Atomically update only agents.defaults.modelPreset in the raw config JSON."""
+    path = config_path or get_config_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Failed to load config from {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"Failed to load config from {path}: root must be a JSON object")
+
+    agents = data.setdefault("agents", {})
+    if not isinstance(agents, dict):
+        raise ValueError(f"Failed to update config at {path}: agents must be a JSON object")
+    defaults = agents.setdefault("defaults", {})
+    if not isinstance(defaults, dict):
+        raise ValueError(
+            f"Failed to update config at {path}: agents.defaults must be a JSON object"
+        )
+    defaults["modelPreset"] = model_preset
+    _atomic_write_json(path, data)
+
+
+def _atomic_write_json(path: Path, data: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as f:
+            temp_path = Path(f.name)
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, path)
+        if os.name != "nt":
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+    finally:
+        if temp_path is not None and temp_path.exists():
+            temp_path.unlink()
 
 
 _ENV_REF_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")

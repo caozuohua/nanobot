@@ -26,6 +26,7 @@ from nanobot.utils.helpers import (
     strip_think,
     truncate_text,
 )
+from nanobot.utils.llm_runtime import LLMTurnGate
 from nanobot.utils.prompt_templates import render_template
 
 if TYPE_CHECKING:
@@ -618,6 +619,7 @@ class Consolidator:
         max_completion_tokens: int = 4096,
         consolidation_ratio: float = 0.5,
         unified_session: bool = False,
+        llm_turn_gate: LLMTurnGate | None = None,
     ):
         self.store = store
         self.provider = provider
@@ -629,6 +631,7 @@ class Consolidator:
         self.unified_session = unified_session
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
+        self._llm_turn_gate = llm_turn_gate or LLMTurnGate()
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
             weakref.WeakValueDictionary()
         )
@@ -809,20 +812,22 @@ class Consolidator:
         try:
             formatted = MemoryStore._format_messages(messages)
             formatted = self._truncate_to_token_budget(formatted)
-            response = await self.provider.chat_with_retry(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": render_template(
-                            "agent/consolidator_archive.md",
-                            strip=True,
-                        ),
-                    },
-                    {"role": "user", "content": formatted},
-                ],
-                tools=None,
-                tool_choice=None,
+            response = await self._llm_turn_gate.run(
+                lambda: self.provider.chat_with_retry(
+                    model=self.model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": render_template(
+                                "agent/consolidator_archive.md",
+                                strip=True,
+                            ),
+                        },
+                        {"role": "user", "content": formatted},
+                    ],
+                    tools=None,
+                    tool_choice=None,
+                )
             )
             if response.finish_reason == "error":
                 raise RuntimeError(f"LLM returned error: {response.content}")

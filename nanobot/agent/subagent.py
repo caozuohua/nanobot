@@ -27,6 +27,7 @@ from nanobot.security.workspace_access import (
     reset_workspace_scope,
     workspace_sandbox_status,
 )
+from nanobot.utils.llm_runtime import LLMTurnGate
 from nanobot.utils.prompt_templates import render_template
 
 
@@ -89,6 +90,7 @@ class SubagentManager:
         max_concurrent_subagents: int | None = None,
         llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
         profile: RuntimeProfile | str | None = None,
+        llm_turn_gate: LLMTurnGate | None = None,
     ):
         defaults = AgentDefaults()
         self.provider = provider
@@ -110,7 +112,7 @@ class SubagentManager:
             if max_concurrent_subagents is not None
             else defaults.max_concurrent_subagents
         )
-        self.runner = AgentRunner(provider)
+        self.runner = AgentRunner(provider, llm_turn_gate=llm_turn_gate)
         self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
@@ -385,6 +387,15 @@ class SubagentManager:
                  if tid in self._running_tasks and not self._running_tasks[tid].done()]
         for t in tasks:
             t.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        return len(tasks)
+
+    async def cancel_all(self) -> int:
+        """Cancel and await all running subagents."""
+        tasks = [task for task in self._running_tasks.values() if not task.done()]
+        for task in tasks:
+            task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         return len(tasks)

@@ -1,7 +1,10 @@
+import asyncio
+
 import pytest
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.utils.evaluator import evaluate_response
+from nanobot.utils.llm_runtime import LLMTurnGate
 
 
 class DummyProvider(LLMProvider):
@@ -79,3 +82,26 @@ async def test_fail_closed_on_no_tool_call() -> None:
     provider = DummyProvider([LLMResponse(content="text only", tool_calls=[])])
     result = await evaluate_response("some", "task", provider, "m", default_notify=False)
     assert result is False
+
+
+@pytest.mark.asyncio
+async def test_evaluator_waits_for_shared_llm_gate() -> None:
+    provider = DummyProvider([_eval_tool_call(True)])
+    gate = LLMTurnGate()
+
+    async with gate.hold():
+        evaluation = asyncio.create_task(
+            evaluate_response(
+                "important update",
+                "check status",
+                provider,
+                "m",
+                llm_turn_gate=gate,
+            )
+        )
+        await asyncio.sleep(0)
+        assert not evaluation.done()
+        assert len(provider._responses) == 1
+
+    assert await evaluation is True
+    assert provider._responses == []

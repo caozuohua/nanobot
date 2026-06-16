@@ -49,9 +49,10 @@ def _make_full_loop(tmp_path: Path) -> AgentLoop:
     return loop
 
 
-def test_agent_loop_llm_runtime_reflects_current_provider_and_model(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_agent_loop_llm_runtime_reflects_current_provider_and_model(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
-    runtime = loop.llm_runtime()
+    runtime = await loop.llm_runtime()
 
     assert runtime.provider is loop.provider
     assert runtime.model == "test-model"
@@ -59,7 +60,7 @@ def test_agent_loop_llm_runtime_reflects_current_provider_and_model(tmp_path: Pa
     next_provider = MagicMock()
     loop.provider = next_provider
     loop.model = "next-model"
-    runtime = loop.llm_runtime()
+    runtime = await loop.llm_runtime()
 
     assert runtime.provider is next_provider
     assert runtime.model == "next-model"

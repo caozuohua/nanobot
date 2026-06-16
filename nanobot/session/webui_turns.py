@@ -27,7 +27,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.helpers import strip_think, truncate_text
-from nanobot.utils.llm_runtime import LLMRuntime
+from nanobot.utils.llm_runtime import LLMRuntime, LLMTurnGate
 
 WEBUI_SESSION_METADATA_KEY = "webui"
 WEBUI_TITLE_METADATA_KEY = "title"
@@ -93,6 +93,7 @@ async def maybe_generate_webui_title(
     session_key: str,
     provider: LLMProvider,
     model: str,
+    llm_turn_gate: LLMTurnGate | None = None,
 ) -> bool:
     """Generate and persist a short title for WebUI-owned sessions only."""
     session = sessions.get_or_create(session_key)
@@ -128,23 +129,30 @@ async def maybe_generate_webui_title(
         prompt += f"\nAssistant: {truncate_text(assistant_text, 1_000)}"
 
     try:
-        response = await provider.chat_with_retry(
-            [
-                {
-                    "role": "system",
-                    "content": (
-                        "You write short, neutral chat titles. "
-                        "Return only the title text."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-            tools=None,
-            model=model,
-            max_tokens=TITLE_GENERATION_MAX_TOKENS,
-            temperature=0.2,
-            reasoning_effort=TITLE_GENERATION_REASONING_EFFORT,
-            retry_mode="standard",
+        async def _request_title():
+            return await provider.chat_with_retry(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You write short, neutral chat titles. "
+                            "Return only the title text."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                tools=None,
+                model=model,
+                max_tokens=TITLE_GENERATION_MAX_TOKENS,
+                temperature=0.2,
+                reasoning_effort=TITLE_GENERATION_REASONING_EFFORT,
+                retry_mode="standard",
+            )
+
+        response = (
+            await llm_turn_gate.run(_request_title)
+            if llm_turn_gate is not None
+            else await _request_title()
         )
     except Exception:
         logger.debug("Failed to generate webui session title for {}", session_key, exc_info=True)
@@ -171,6 +179,7 @@ async def maybe_generate_webui_title_after_turn(
     session_key: str,
     provider: LLMProvider,
     model: str,
+    llm_turn_gate: LLMTurnGate | None = None,
 ) -> bool:
     if channel != "websocket" or metadata.get(WEBUI_SESSION_METADATA_KEY) is not True:
         return False
@@ -179,6 +188,7 @@ async def maybe_generate_webui_title_after_turn(
         session_key=session_key,
         provider=provider,
         model=model,
+        llm_turn_gate=llm_turn_gate,
     )
 
 
@@ -402,6 +412,7 @@ class WebuiTurnCoordinator:
                 session_key=session_key,
                 provider=title_llm.provider,
                 model=title_llm.model,
+                llm_turn_gate=title_llm.turn_gate,
             )
             if generated:
                 await self.bus.publish_outbound(OutboundMessage(
@@ -436,6 +447,7 @@ class WebuiTurnCoordinator:
                 session_key=event.context.session_key,
                 provider=title_llm.provider,
                 model=title_llm.model,
+                llm_turn_gate=title_llm.turn_gate,
             )
             if generated:
                 await self.bus.publish_outbound(OutboundMessage(
