@@ -176,6 +176,29 @@ async def test_sessions_routes_require_bearer_token(
 
 
 @pytest.mark.asyncio
+async def test_removed_pkb_api_routes_return_404(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    index = tmp_path / "dist" / "index.html"
+    index.parent.mkdir()
+    index.write_text("<!doctype html><title>nanobot</title>", encoding="utf-8")
+    channel = _ch(bus, static_dist_path=index.parent, port=29903)
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        resp = await _http_get("http://127.0.0.1:29903/api/pkb")
+        assert resp.status_code == 404
+        assert resp.text == "API route not found"
+
+        nested = await _http_get("http://127.0.0.1:29903/api/pkb/records")
+        assert nested.status_code == 404
+        assert nested.text == "API route not found"
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
 async def test_session_automations_route_filters_by_webui_session(
     bus: MagicMock, tmp_path: Path
 ) -> None:
