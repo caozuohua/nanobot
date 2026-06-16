@@ -26,7 +26,6 @@ target = Path("/etc/nanobot/nanobot.env")
 allowed = {
     "GCP_PROJECT", "GCP_LOCATION", "GEMINI_MODEL", "GEMINI_API_KEY",
     "GITHUB_TOKEN", "GITHUB_OWNER", "GITHUB_USER",
-    "PKB_API_SECRET", "PKB_BASE_URL", "PKB_TIMEOUT_MS",
     "TAVILY_API_KEY", "TAVILY_API_KEY_2",
 }
 values = {}
@@ -43,7 +42,6 @@ for key in allowed:
 values["GOOGLE_APPLICATION_CREDENTIALS"] = "/etc/nanobot/google-service-account.json"
 values["NANOBOT_REPO_BLOG"] = "/var/www/blog"
 values["NANOBOT_REPO_NEWSLETTER"] = "/opt/workspace/ai-daily-newsletter-repo"
-values["NANOBOT_REPO_PKB"] = "/var/lib/nanobot/pkb"
 target.write_text("\n".join(f"{key}={value}" for key, value in sorted(values.items())) + "\n")
 PY
 chown root:nanobot /etc/nanobot/nanobot.env

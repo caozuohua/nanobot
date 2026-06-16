@@ -1,31 +1,6 @@
-import json
-
-import httpx
 import pytest
 
-from nanobot.agent.tools.external_resources import ManagedRepoTool, PkbTool
-
-
-@pytest.mark.asyncio
-async def test_pkb_tool_searches_with_secret_header(monkeypatch) -> None:
-    seen = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen["header"] = request.headers["x-api-secret"]
-        seen["body"] = json.loads(request.content)
-        return httpx.Response(200, json={"items": [{"id": "n1"}]})
-
-    monkeypatch.setenv("PKB_BASE_URL", "https://pkb.example")
-    monkeypatch.setenv("PKB_API_SECRET", "secret")
-    tool = PkbTool(transport=httpx.MockTransport(handler))
-
-    result = json.loads(await tool.execute(action="search", query="nanobot", limit=3))
-
-    assert result["items"][0]["id"] == "n1"
-    assert seen == {
-        "header": "secret",
-        "body": {"query": "nanobot", "limit": 3, "action": "search"},
-    }
+from nanobot.agent.tools.external_resources import ManagedRepoTool
 
 
 @pytest.mark.asyncio
@@ -33,6 +8,15 @@ async def test_managed_repo_rejects_unknown_repository() -> None:
     tool = ManagedRepoTool()
 
     result = await tool.execute(action="status", repository="other")
+
+    assert result.startswith("Error: repository must be one of")
+
+
+@pytest.mark.asyncio
+async def test_managed_repo_rejects_removed_pkb_repository() -> None:
+    tool = ManagedRepoTool()
+
+    result = await tool.execute(action="status", repository="pkb")
 
     assert result.startswith("Error: repository must be one of")
 

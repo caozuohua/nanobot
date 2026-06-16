@@ -9,7 +9,6 @@ shift 2
 case "$name" in
   blog) repo=/var/www/blog; expected='github.com/caozuohua/caozuohua.github.io' ;;
   newsletter) repo=/opt/workspace/ai-daily-newsletter-repo; expected='github.com/caozuohua/ai-daily-newsletter' ;;
-  pkb) repo=/var/lib/nanobot/pkb; expected='github.com/caozuohua/' ;;
   *) echo "repository not allowed" >&2; exit 2 ;;
 esac
 

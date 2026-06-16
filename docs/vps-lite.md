@@ -2,7 +2,7 @@
 
 `vps-lite` is the reduced nanobot runtime for small Linux VPS instances. It keeps
 Lark WebSocket, Telegram, Discord, Vertex AI, Google AI Studio, OpenAI-compatible
-providers, remote HTTP/SSE MCP, filesystem/shell/web tools, PKB and managed
+providers, remote HTTP/SSE MCP, filesystem/shell/web tools, and managed
 repositories. It does not ship the WebUI or open a public listener.
 
 ## Models and commands
@@ -45,16 +45,14 @@ Restart once more after removing credentials. Do not uninstall `google-genai`.
 Rollback: restore `NANOBOT_VERTEX_ENABLED=true`, restore the three Google
 environment values and service account file, then restart the service.
 
-## PKB and repositories
+## Managed repositories
 
-The `pkb` tool uses `PKB_BASE_URL` and `PKB_API_SECRET`. The `managed_repo` tool
-can read and write approved repository paths and delegates pull, commit, push
-and blog publication to `/usr/local/sbin/nanobot-repo`.
+The `managed_repo` tool can read and write approved repository paths and delegates
+pull, commit, push and blog publication to `/usr/local/sbin/nanobot-repo`.
 
-Approved repositories are configured with `NANOBOT_REPO_BLOG`,
-`NANOBOT_REPO_PKB` and `NANOBOT_REPO_NEWSLETTER`. The privileged wrapper checks
-the repository name, local path, remote and action. It never force-pushes or
-resets a worktree.
+Approved repositories are configured with `NANOBOT_REPO_BLOG`
+and `NANOBOT_REPO_NEWSLETTER`. The privileged wrapper checks the repository
+name, local path, remote and action. It never force-pushes or resets a worktree.
 
 ## Install and migrate
 
@@ -73,10 +71,9 @@ root-owned wrappers and creates an `fd` alias for Debian's `fdfind`.
 
 ## Verification and rollback
 
-Validate both providers with real requests, run `/model`, query and save a PKB
-note, and push a harmless repository commit before considering migration
-complete. Confirm Lark reports a WebSocket long connection and `ss -lntp` shows
-no nanobot listener.
+Validate both providers with real requests, run `/model`, and push a harmless
+repository commit before considering migration complete. Confirm Lark reports a
+WebSocket long connection and `ss -lntp` shows no nanobot listener.
 
 Rollback keeps all luck-agent files and credentials:
 

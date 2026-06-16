@@ -327,9 +327,9 @@ def test_parallel_tool_results_are_grouped_into_one_function_response_turn() -> 
             "content": None,
             "tool_calls": [
                 {
-                    "id": "call-pkb",
+                    "id": "call-web",
                     "type": "function",
-                    "function": {"name": "pkb", "arguments": '{"action":"list"}'},
+                    "function": {"name": "web_search", "arguments": '{"query":"nanobot"}'},
                 },
                 {
                     "id": "call-blog",
@@ -343,9 +343,9 @@ def test_parallel_tool_results_are_grouped_into_one_function_response_turn() -> 
         },
         {
             "role": "tool",
-            "tool_call_id": "call-pkb",
-            "name": "pkb",
-            "content": '{"items":[]}',
+            "tool_call_id": "call-web",
+            "name": "web_search",
+            "content": '{"results":[]}',
         },
         {
             "role": "tool",
@@ -359,7 +359,7 @@ def test_parallel_tool_results_are_grouped_into_one_function_response_turn() -> 
     assert contents[1]["role"] == "user"
     responses = contents[1]["parts"]
     assert [part["function_response"]["name"] for part in responses] == [
-        "pkb",
+        "web_search",
         "managed_repo",
     ]
 
