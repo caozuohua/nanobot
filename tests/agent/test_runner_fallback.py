@@ -360,6 +360,33 @@ class TestFailoverOnTransientError:
         assert result.finish_reason == "stop"
         factory.assert_called_once_with(_fallback("fallback-a"))
 
+    @pytest.mark.asyncio
+    async def test_vertex_resource_exhausted_falls_back_even_when_not_retryable(self) -> None:
+        primary = _FakeProvider(
+            "primary",
+            _make_response(
+                "Error calling Vertex AI: 429 RESOURCE_EXHAUSTED",
+                finish_reason="error",
+                error_status_code=429,
+                error_type="resource_exhausted",
+                error_code="RESOURCE_EXHAUSTED",
+                error_should_retry=False,
+            ),
+        )
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        factory = MagicMock(return_value=fallback)
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a")],
+            provider_factory=factory,
+        )
+
+        result = await fb.chat(messages=[{"role": "user", "content": "hi"}])
+
+        assert result.content == "fallback ok"
+        assert result.finish_reason == "stop"
+        factory.assert_called_once_with(_fallback("fallback-a"))
+
 
 class TestNoFallbackOnNonRetryableError:
     @pytest.mark.asyncio

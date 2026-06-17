@@ -286,8 +286,6 @@ class FallbackProvider(LLMProvider):
 
     @staticmethod
     def _should_fallback(response: LLMResponse) -> bool:
-        if response.error_should_retry is False:
-            return False
         status = response.error_status_code
         kind = (response.error_kind or "").lower()
         error_type = (response.error_type or "").lower()
@@ -306,4 +304,8 @@ class FallbackProvider(LLMProvider):
             return True
         if kind in _FALLBACK_ERROR_KINDS:
             return True
-        return any(token in value for value in (kind, error_type, code, text) for token in _FALLBACK_ERROR_TOKENS)
+        if any(token in value for value in (kind, error_type, code, text) for token in _FALLBACK_ERROR_TOKENS):
+            return True
+        if response.error_should_retry is False:
+            return False
+        return False
