@@ -56,6 +56,39 @@ def test_vps_catalog_installs_vertex_and_ai_studio_presets(monkeypatch) -> None:
     ]
     assert config.model_presets["vertex-25-flash"].provider == "vertex_ai"
     assert config.model_presets["studio-25-flash"].provider == "gemini"
+    assert config.agents.defaults.fallback_models == [
+        "studio-35-flash",
+        "studio-31-flash-lite",
+    ]
+
+
+def test_vps_catalog_preserves_user_fallback_models(monkeypatch) -> None:
+    monkeypatch.delenv("NANOBOT_VERTEX_ENABLED", raising=False)
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"fallbackModels": ["studio-25-flash"]}},
+            "modelPresets": {
+                "studio-25-flash": {
+                    "model": "gemini/gemini-2.5-flash",
+                    "provider": "gemini",
+                },
+            },
+        }
+    )
+
+    install_vps_model_catalog(config)
+
+    assert config.agents.defaults.fallback_models == ["studio-25-flash"]
+
+
+def test_vps_catalog_default_fallbacks_skip_active_studio_preset(monkeypatch) -> None:
+    monkeypatch.delenv("NANOBOT_VERTEX_ENABLED", raising=False)
+    config = Config()
+    config.agents.defaults.model_preset = "studio-35-flash"
+
+    install_vps_model_catalog(config)
+
+    assert config.agents.defaults.fallback_models == ["studio-31-flash-lite"]
 
 
 def test_vps_catalog_omits_vertex_and_retains_all_studio_presets(monkeypatch) -> None:

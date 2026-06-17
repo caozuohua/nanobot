@@ -28,6 +28,16 @@ class TestBuildDreamPrompt:
         assert "## Conversation History" in prompt
         assert "hello" in prompt
 
+    def test_dream_prompt_routes_active_tasks_to_todo(self, store):
+        store.append_history("I wrote a plan to integrate Mem0 later.")
+
+        result = store.build_dream_prompt()
+
+        assert result is not None
+        prompt, _cursor = result
+        assert "TODO.md" in prompt
+        assert "completed or abandoned" in prompt
+
     def test_cursor_advances_only_new_entries(self, store):
         store.append_history("first")
         r1 = store.build_dream_prompt()
@@ -110,6 +120,28 @@ class TestDreamTools:
             "read_file",
             "write_file",
         }
+
+    async def test_dream_tools_can_create_and_edit_todo(self, store):
+        tools = store.build_dream_tools()
+        write_file = tools.get("write_file")
+        edit_file = tools.get("edit_file")
+
+        assert write_file is not None
+        assert edit_file is not None
+
+        created = await write_file.execute(
+            path="TODO.md",
+            content="- Initial task\n",
+        )
+        edited = await edit_file.execute(
+            path="TODO.md",
+            old_text="Initial task",
+            new_text="Updated task",
+        )
+
+        assert "Successfully wrote" in created
+        assert "Successfully edited" in edited
+        assert "Updated task" in (store.workspace / "TODO.md").read_text(encoding="utf-8")
 
 
 class TestEphemeralDirect:

@@ -1,10 +1,8 @@
 """Tests for GitStore — git-backed version control for memory files."""
 
 import pytest
-from pathlib import Path
 
-from nanobot.utils.gitstore import GitStore, CommitInfo
-
+from nanobot.utils.gitstore import CommitInfo, GitStore
 
 TRACKED = ["SOUL.md", "USER.md", "memory/MEMORY.md"]
 
@@ -64,7 +62,9 @@ class TestBuildGitignore:
         content = gs._build_gitignore()
         assert "!a.md\n" in content
         assert "!b.md\n" in content
-        dir_lines = [l for l in content.split("\n") if l.startswith("!") and l.endswith("/")]
+        dir_lines = [
+            line for line in content.split("\n") if line.startswith("!") and line.endswith("/")
+        ]
         assert dir_lines == []
 
 
@@ -232,3 +232,21 @@ class TestMemoryStoreGitProperty:
         from nanobot.agent.memory import MemoryStore
         store = MemoryStore(tmp_path)
         assert store.git is store._git
+
+    def test_memory_store_git_tracks_todo_md(self, tmp_path):
+        from nanobot.agent.memory import MemoryStore
+
+        store = MemoryStore(tmp_path)
+        store.git.init()
+
+        (tmp_path / "TODO.md").write_text("- Keep task state visible\n", encoding="utf-8")
+        sha = store.git.auto_commit("dream: update tasks")
+
+        assert sha is not None
+        latest = store.git.log(max_entries=1)[0]
+        assert latest.sha == sha
+        diff = store.git.show_commit_diff(sha)
+        assert diff is not None
+        _commit, patch = diff
+        assert "TODO.md" in patch
+        assert "Keep task state visible" in patch

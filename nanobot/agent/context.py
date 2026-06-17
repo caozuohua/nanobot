@@ -56,6 +56,7 @@ class ContextBuilder:
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
     _MAX_RECENT_HISTORY = 50
     _MAX_HISTORY_CHARS = 32_000  # hard cap on recent history section size
+    _MAX_TODO_CHARS = 4_000
     _RUNTIME_CONTEXT_END = "[/Runtime Context]"
 
     def __init__(
@@ -99,6 +100,10 @@ class ContextBuilder:
         memory = self.memory.get_memory_context()
         if memory and not self._is_template_content(self.memory.read_memory(), "memory/MEMORY.md"):
             parts.append(f"# Memory\n\n{memory}")
+
+        tasks = self._load_todo_tasks(root)
+        if tasks:
+            parts.append("# Active Tasks\n\n" + tasks)
 
         always_skills = self.skills.get_always_skills()
         if always_skills:
@@ -188,6 +193,18 @@ class ContextBuilder:
                 parts.append(f"## {filename}\n\n{content}")
 
         return "\n\n".join(parts) if parts else ""
+
+    def _load_todo_tasks(self, workspace: Path | None = None) -> str:
+        """Load the lightweight task ledger with a strict prompt-size cap."""
+        root = workspace or self.workspace
+        todo_path = root / "TODO.md"
+        try:
+            content = todo_path.read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            return ""
+        if not content:
+            return ""
+        return truncate_text(content, self._MAX_TODO_CHARS)
 
     @staticmethod
     def _is_template_content(content: str, template_path: str) -> bool:

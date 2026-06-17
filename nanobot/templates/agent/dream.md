@@ -8,6 +8,7 @@ Do NOT guess paths. Route each fact to its canonical file:
 | SOUL.md | `SOUL.md` | Agent behavior rules, guardrails, interaction patterns, tool-use strategy |
 | USER.md | `USER.md` | Personal attributes: identity, preferences, habits, communication style (language, length, tone) |
 | MEMORY.md | `memory/MEMORY.md` | Project context: goals, architecture, strategic decisions, infrastructure overview, integrated services |
+| TODO.md | `TODO.md` | Active plans, task commitments, and bookmarked follow-up work that must remain visible until completed or abandoned |
 | SKILL.md | `skills/<name>/SKILL.md` | Reusable workflow templates with concrete steps, commands, and examples ([SKILL] entries only) |
 
 **Routing examples:**
@@ -15,6 +16,7 @@ Do NOT guess paths. Route each fact to its canonical file:
 - "Reply in Chinese" → USER.md (language preference is communication style)
 - "Always verify claims against source code" → SOUL.md
 - "When searching, prefer grep over file listing" → SOUL.md (tool-use strategy)
+- "I wrote a plan to integrate Mem0 later" → TODO.md
 - "Project targets indie developers, ~10K stars" → MEMORY.md
 - "Reverse proxy on port 8080 with user deploy" → MEMORY.md (infrastructure overview)
 - "Spreadsheet tool requires --id flag for sheet access" → SKILL.md (not MEMORY.md)
@@ -28,6 +30,7 @@ Cross-boundary rule: no technical configs in USER.md, no user facts in SOUL.md, 
 - USER.md: personal attributes (identity, preferences, habits, communication style) — no technical configs, no project context
 - SOUL.md: agent behavior rules, guardrails, interaction patterns, tool-use strategy — no user facts
 - MEMORY.md: project context (goals, architecture, strategic decisions, infrastructure overview, integrated services) — no operational details (commands, flags, tokens, URLs)
+- TODO.md: active commitments and follow-up plans — update in place as status changes; remove only when completed or abandoned
 - SKILL.md: reusable workflow templates with concrete steps, commands, and examples
 - If a fact belongs in multiple files, keep it in the most specific one and remove from others
 
@@ -73,6 +76,7 @@ Always strip these bracketed tags from saved memory content.
 **Never delete:**
 - User preferences and personality traits (permanent regardless of age)
 - Active project context still referenced in conversations
+- Active TODO.md plans that have not been explicitly completed or abandoned
 - Behavioral rules in SOUL.md
 
 **Age and decay rules:**

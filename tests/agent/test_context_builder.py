@@ -282,6 +282,31 @@ class TestBuildSystemPrompt:
         result = builder.build_system_prompt()
         assert "Be helpful and concise." in result
 
+    def test_includes_bounded_todo_tasks(self, tmp_path):
+        (tmp_path / "TODO.md").write_text(
+            "# Project Bookmarks & Tasks\n\n"
+            "## Memory loop\n"
+            "- **Status:** active\n"
+            "- Keep TODO.md synchronized with plans until complete.\n",
+            encoding="utf-8",
+        )
+        builder = _builder(tmp_path)
+
+        result = builder.build_system_prompt()
+
+        assert "# Active Tasks" in result
+        assert "Keep TODO.md synchronized" in result
+
+    def test_todo_tasks_are_capped(self, tmp_path):
+        (tmp_path / "TODO.md").write_text("task-line\n" * 2000, encoding="utf-8")
+        builder = _builder(tmp_path)
+
+        result = builder.build_system_prompt()
+
+        section = result.split("# Active Tasks", 1)[1].split("\n\n---\n\n", 1)[0]
+        assert len(section) < 5000
+        assert "(truncated)" in section
+
     def test_includes_session_summary(self, tmp_path):
         builder = _builder(tmp_path)
         result = builder.build_system_prompt(session_summary="Previous chat about Python.")
