@@ -118,6 +118,11 @@ class TestConsolidatorPromptContract:
             assert mark in prompt
         assert "check context below" not in prompt.lower()
         assert "Do not mark something [skip] merely because it might already exist" in prompt
+        assert "Dream" in prompt
+        assert "Do not write JSON" in prompt
+        lowered = prompt.lower()
+        assert "free-text" in lowered
+        assert "summaries" in lowered
 
 
 class TestConsolidatorArchiveErrorHandling:

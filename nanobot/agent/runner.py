@@ -13,6 +13,13 @@ from typing import Any, Callable
 
 from loguru import logger
 
+from nanobot.agent.action_gate import (
+    ACTION_FOLLOWUP_MESSAGE,
+    classify_final_response,
+    classify_user_intent,
+    guard_result,
+    should_continue_for_action_guard,
+)
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
@@ -112,6 +119,7 @@ class AgentRunSpec:
     goal_active_predicate: Callable[[], bool] | None = None
     goal_continue_message: str | None = None
     finalize_on_max_iterations: bool = True
+    action_guard: bool = True
 
 
 @dataclass(slots=True)
@@ -126,6 +134,7 @@ class AgentRunResult:
     error: str | None = None
     tool_events: list[dict[str, str]] = field(default_factory=list)
     had_injections: bool = False
+    action_guard: dict[str, Any] = field(default_factory=dict)
 
 
 class AgentRunner:
@@ -341,6 +350,16 @@ class AgentRunner:
         length_recovery_count = 0
         had_injections = False
         injection_cycles = 0
+        action_guard_retried = False
+        user_intent = classify_user_intent(self._latest_user_text(messages))
+        action_guard_record: dict[str, Any] = {
+            "intent": user_intent,
+            "action_required": user_intent == "action",
+            "tools_used": [],
+            "tool_events": [],
+            "final_kind": None,
+            "guard_result": "not_actionable" if user_intent != "action" else None,
+        }
 
         for iteration in range(spec.max_iterations):
             try:
@@ -568,6 +587,60 @@ class AgentRunner:
             )
             if should_continue:
                 had_injections = True
+            elif (
+                spec.action_guard
+                and response.finish_reason != "error"
+                and not is_blank_text(clean)
+            ):
+                final_kind = classify_final_response(clean)
+                action_guard_record.update({
+                    "final_kind": final_kind,
+                    "tool_events": list(tool_events),
+                    "tools_used": list(tools_used),
+                })
+                guard_previously_continued = action_guard_record.get("guard_result") == "continued"
+                guard_should_continue = should_continue_for_action_guard(
+                    user_intent,
+                    final_kind,
+                    tool_events,
+                    already_retried=action_guard_retried,
+                )
+                final_has_tool_evidence = any(
+                    event.get("status") == "ok" for event in tool_events
+                )
+                if (
+                    not guard_previously_continued
+                    or guard_should_continue
+                    or not final_has_tool_evidence
+                ):
+                    action_guard_record["guard_result"] = guard_result(
+                        user_intent,
+                        final_kind,
+                        tool_events,
+                        continued=guard_should_continue,
+                        already_retried=action_guard_retried,
+                    )
+                if guard_should_continue and assistant_message is not None:
+                    action_guard_retried = True
+                    messages.append(assistant_message)
+                    messages.append({"role": "user", "content": ACTION_FOLLOWUP_MESSAGE})
+                    await self._emit_checkpoint(
+                        spec,
+                        {
+                            "phase": "action_guard_continue",
+                            "iteration": iteration,
+                            "model": spec.model,
+                            "assistant_message": assistant_message,
+                            "completed_tool_results": [],
+                            "pending_tool_calls": [],
+                        },
+                    )
+                    logger.info(
+                        "Action guard continued turn for {} after {} final without tools",
+                        spec.session_key or "default",
+                        final_kind,
+                    )
+                    should_continue = True
 
             if hook.wants_streaming():
                 await hook.on_stream_end(context, resuming=should_continue)
@@ -669,7 +742,26 @@ class AgentRunner:
             error=error,
             tool_events=tool_events,
             had_injections=had_injections,
+            action_guard=action_guard_record,
         )
+
+    @staticmethod
+    def _latest_user_text(messages: list[dict[str, Any]]) -> str:
+        for message in reversed(messages):
+            if message.get("role") != "user":
+                continue
+            content = message.get("content")
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):
+                parts = [
+                    str(item.get("text", ""))
+                    for item in content
+                    if isinstance(item, dict)
+                ]
+                return "\n".join(part for part in parts if part)
+            return str(content or "")
+        return ""
 
     def _build_request_kwargs(
         self,

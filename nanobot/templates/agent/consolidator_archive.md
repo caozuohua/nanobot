@@ -20,5 +20,11 @@ Priority: user corrections and preferences > solutions > decisions > events > en
 
 Do not mark something [skip] merely because it might already exist in long-term memory; Dream handles cross-file deduplication later.
 
+Dream is the authoritative router for these tagged bullets. Your job is only to
+produce compact, tagged source facts that Dream can later route, merge, or delete.
+Do not write JSON, YAML, tables, headings, or prose paragraphs. Legacy free-text
+summaries may exist in history, but new summaries must use this tagged bullet
+format.
+
 Output concise bullet points only. No preamble, no commentary.
 If nothing noteworthy happened, output: (nothing)
