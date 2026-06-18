@@ -8,6 +8,7 @@ import pytest
 
 from nanobot.command.builtin import register_builtin_commands
 from nanobot.command.router import CommandContext, CommandRouter
+from nanobot.runtime_profile import FULL_PROFILE
 
 
 class TestIsDispatchableCommand:
@@ -83,6 +84,7 @@ class TestMidTurnCommandDispatchedDirectly:
         loop.sessions.invalidate = MagicMock()
         loop._schedule_background = MagicMock()
         loop._cancel_active_tasks = AsyncMock(return_value=0)
+        loop.runtime_profile = FULL_PROFILE
         return loop
 
     @pytest.fixture()

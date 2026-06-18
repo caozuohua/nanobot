@@ -54,15 +54,19 @@ def install_vps_model_catalog(config: Config) -> None:
 
 def install_vps_default_fallbacks(config: Config) -> None:
     """Install a small AI Studio fallback chain unless the user configured one."""
-    if config.agents.defaults.fallback_models:
+    agents = getattr(config, "agents", None)
+    defaults = getattr(agents, "defaults", None)
+    if defaults is None:
         return
-    active = config.agents.defaults.model_preset
+    if defaults.fallback_models:
+        return
+    active = defaults.model_preset
     available = [
         preset
         for preset in DEFAULT_FALLBACK_PRESETS
         if preset in config.model_presets and preset != active
     ]
-    config.agents.defaults.fallback_models = available
+    defaults.fallback_models = available
 
 
 def validate_vps_model_selection(config: Config, preset_name: str | None) -> None:
