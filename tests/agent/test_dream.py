@@ -2,8 +2,10 @@
 
 import pytest
 
+from nanobot.agent.context import ContextBuilder
 from nanobot.agent.memory import MemoryStore
 from nanobot.providers.base import LLMResponse
+from nanobot.runtime_profile import VPS_LITE_PROFILE
 from nanobot.utils.prompt_templates import render_template
 
 
@@ -108,6 +110,40 @@ class TestBuildDreamPrompt:
         assert "[skip]: audit-only" in prompt
         assert "[correction]: replace the older conflicting fact" in prompt
         assert "Always strip these bracketed tags from saved memory content" in prompt
+
+    def test_vps_lite_memory_context_dream_path(self, tmp_path):
+        store = MemoryStore(tmp_path)
+        store.write_memory("# Long-term Memory\n\nUser prefers short status updates.")
+        store.append_history(
+            "Keep the VPS memory-loop follow-up task visible until deployed.",
+            session_key="feishu:ops",
+        )
+
+        result = store.build_dream_prompt(max_entries=1)
+
+        assert result is not None
+        dream_prompt, cursor = result
+        assert "## Conversation History" in dream_prompt
+        assert "VPS memory-loop follow-up task" in dream_prompt
+        assert "TODO.md" in dream_prompt
+
+        store.set_last_dream_cursor(cursor)
+        (tmp_path / "TODO.md").write_text(
+            "# Project Bookmarks & Tasks\n\n"
+            "## VPS-lite memory loop\n"
+            "- Keep memory/context/dream regression coverage in the updater gate.\n",
+            encoding="utf-8",
+        )
+
+        prompt = ContextBuilder(tmp_path, profile=VPS_LITE_PROFILE).build_system_prompt(
+            session_key="feishu:ops",
+        )
+
+        assert "# Memory\n\n## Long-term Memory" in prompt
+        assert "User prefers short status updates." in prompt
+        assert "# Active Tasks" in prompt
+        assert "memory/context/dream regression coverage" in prompt
+        assert "# Recent History" not in prompt
 
 
 class TestDreamTools:

@@ -83,6 +83,9 @@ build_and_test() {
     NANOBOT_VPS_LITE_WHEEL="${wheel}" \
     "${build_venv}/bin/python" -m pytest -q \
     "${SOURCE_DIR}/tests/build/test_vps_lite_artifact.py" \
+    "${SOURCE_DIR}/tests/agent/test_memory_store.py" \
+    "${SOURCE_DIR}/tests/agent/test_context_builder.py" \
+    "${SOURCE_DIR}/tests/agent/test_dream.py" \
     "${SOURCE_DIR}/tests/providers/test_vertex_ai_provider.py" \
     "${SOURCE_DIR}/tests/tools/test_external_resources.py" \
     "${SOURCE_DIR}/tests/deploy/test_vps_lite_deploy_files.py" >&2

@@ -167,6 +167,9 @@ def test_vps_updater_is_fixed_safe_and_validates_before_install() -> None:
     assert "merge --ff-only" in text
     assert "NANOBOT_BUILD_PROFILE=vps-lite" in text
     assert "tests/build/test_vps_lite_artifact.py" in text
+    assert "tests/agent/test_memory_store.py" in text
+    assert "tests/agent/test_context_builder.py" in text
+    assert "tests/agent/test_dream.py" in text
     assert "tests/providers/test_vertex_ai_provider.py" in text
     assert "tests/tools/test_external_resources.py" in text
     assert "tests/deploy/test_vps_lite_deploy_files.py" in text
