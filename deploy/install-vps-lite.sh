@@ -177,10 +177,12 @@ validate_runtime() {
     run_as_nanobot env NANOBOT_PROFILE=vps-lite "${VENV_PYTHON}" - <<'PY'
 from pathlib import Path
 
+from nanobot.agent.vps_model_catalog import install_vps_model_catalog
 from nanobot.config.loader import load_config
 from nanobot.runtime_profile import resolve_runtime_profile
 
-config = load_config(Path("/etc/nanobot/config.json"))
+config = load_config(Path("/etc/nanobot/config.json"), defer_model_preset_validation=True)
+install_vps_model_catalog(config)
 config.validate_runtime_profile(resolve_runtime_profile("vps-lite"))
 print("Validated vps-lite config and profile.")
 PY
