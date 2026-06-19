@@ -56,7 +56,7 @@ refresh_runtime() {
 }
 
 run_core_tests() {
-  run_as_nanobot env NANOBOT_PROFILE=vps-lite "${VENV_PYTHON}" -m pytest -q \
+  run_as_nanobot "${VENV_PYTHON}" -m pytest -q \
     "${SOURCE_DIR}/tests/agent/test_dream.py" \
     "${SOURCE_DIR}/tests/agent/tools/test_long_task.py" \
     "${SOURCE_DIR}/tests/agent/tools/test_self_tool.py" \
