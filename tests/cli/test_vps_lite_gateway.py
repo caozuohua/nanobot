@@ -108,10 +108,6 @@ def test_gateway_uses_environment_profile_and_resolves_it_once(
             ),
             "Provider 'anthropic' is not available in runtime profile 'vps-lite'",
         ),
-        (
-            lambda config: setattr(config.tools.my, "enable", True),
-            "tools.my.enable",
-        ),
     ],
 )
 def test_gateway_rejects_unsupported_lite_components_before_runtime(
@@ -133,6 +129,23 @@ def test_gateway_rejects_unsupported_lite_components_before_runtime(
 
     assert result.exit_code == 1
     assert expected in result.stdout
+
+
+def test_gateway_allows_self_tool_in_vps_lite(monkeypatch, tmp_path: Path) -> None:
+    config = _lite_config(tmp_path)
+    config.tools.my.enable = True
+    seen: list[object] = []
+    monkeypatch.setattr(commands, "_load_runtime_config", lambda *_args, **_kwargs: config)
+    monkeypatch.setattr(
+        commands,
+        "_run_gateway",
+        lambda _config, **kwargs: seen.append(kwargs["profile"]),
+    )
+
+    result = runner.invoke(commands.app, ["gateway", "--profile", "vps-lite"])
+
+    assert result.exit_code == 0
+    assert seen == [VPS_LITE_PROFILE]
 
 
 @pytest.mark.parametrize("selection_source", ["persisted", "default"])

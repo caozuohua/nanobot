@@ -116,7 +116,17 @@ install_config_template() {
 {
   "agents": {
     "defaults": {
-      "workspace": "/var/lib/nanobot/workspace"
+      "workspace": "/var/lib/nanobot/workspace",
+      "modelPreset": "vertex-25-flash"
+    }
+  },
+  "providers": {
+    "vertexAi": {
+      "project": "${GOOGLE_CLOUD_PROJECT}",
+      "location": "${GOOGLE_CLOUD_LOCATION}"
+    },
+    "gemini": {
+      "apiKey": "${GEMINI_API_KEY}"
     }
   },
   "channels": {
