@@ -216,10 +216,9 @@ def test_discover_enabled_filters_vps_lite_builtins_before_import():
 
     assert result == {
         "feishu": _FakePlugin,
-        "telegram": _FakePlugin,
         "discord": _FakePlugin,
     }
-    assert loaded == ["feishu", "telegram", "discord"]
+    assert loaded == ["feishu", "discord"]
 
 
 def test_discover_plugins_does_not_enumerate_entry_points_when_profile_disallows_them():
@@ -292,7 +291,7 @@ async def test_manager_loads_plugin_from_dict_config():
     assert isinstance(mgr.channels["fakeplugin"], _FakePlugin)
 
 
-@pytest.mark.parametrize("channel_name", ["websocket", "slack", "fakeplugin"])
+@pytest.mark.parametrize("channel_name", ["websocket", "slack", "telegram", "fakeplugin"])
 def test_manager_rejects_enabled_channel_unavailable_in_profile(channel_name):
     config = Config.model_validate({
         "channels": {

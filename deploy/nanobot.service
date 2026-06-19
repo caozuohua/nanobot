@@ -7,10 +7,10 @@ After=network-online.target
 Type=simple
 User=nanobot
 Group=nanobot
-WorkingDirectory=/var/lib/nanobot
+WorkingDirectory=/opt/nanobot
 EnvironmentFile=-/etc/nanobot/nanobot.env
 Environment=NANOBOT_PROFILE=vps-lite
-ExecStart=/opt/nanobot/.venv/bin/nanobot gateway --profile vps-lite --config /var/lib/nanobot/config.json
+ExecStart=/opt/nanobot/.venv/bin/nanobot gateway --profile vps-lite --config /etc/nanobot/config.json --workspace /var/lib/nanobot/workspace
 Restart=on-failure
 RestartSec=5s
 MemoryHigh=550M

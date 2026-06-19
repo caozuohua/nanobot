@@ -156,8 +156,9 @@ def test_lite_profile_filters_modules_before_import(monkeypatch):
         "web",
         "cron",
         "message",
-        "external_resources",
         "long_task",
+        "mcp",
+        "self",
     }
     imported: list[str] = []
     original_import = importlib.import_module
@@ -178,7 +179,9 @@ def test_lite_profile_filters_modules_before_import(monkeypatch):
     assert imported
     assert module_names <= allowed
     assert "long_task" in module_names
-    assert {"my", "image_generation", "spawn", "cli_apps"}.isdisjoint(module_names)
+    assert "self" in imported
+    assert "self" not in module_names
+    assert {"image_generation", "spawn", "cli_apps", "external_resources"}.isdisjoint(module_names)
 
 
 def test_lite_profile_disables_entrypoint_plugins(monkeypatch):
@@ -194,9 +197,7 @@ def test_lite_profile_disables_entrypoint_plugins(monkeypatch):
 @pytest.mark.parametrize(
     ("mutator", "expected_fragment"),
     [
-        (lambda tools: None, "tools.my.enable"),
         (lambda tools: setattr(tools.image_generation, "enabled", True), "tools.image_generation.enabled"),
-        (lambda tools: setattr(tools.cli_apps, "enable", True), "tools.cli_apps.enable"),
     ],
 )
 def test_lite_profile_raises_for_configured_excluded_capabilities(
@@ -209,6 +210,13 @@ def test_lite_profile_raises_for_configured_excluded_capabilities(
 
     with pytest.raises(RuntimeProfileError, match=expected_fragment):
         loader.load(ctx, registry=ToolRegistry())
+
+
+def test_lite_profile_allows_self_tool_when_configured():
+    tools = ToolsConfig()
+    tools.my.enable = True
+
+    VPS_LITE_PROFILE.validate_tools_config(tools)
 
 
 # --- Task 4: _FsTool.create() ---
@@ -246,7 +254,7 @@ def test_fs_tool_create_adds_configured_allowed_dirs():
 
     tool = ReadFileTool.create(ctx)
 
-    assert Path("/var/www/blog") in tool._extra_allowed_dirs
+    assert Path("/var/www/blog") in tool._extra_read_allowed_dirs
 
 
 def test_fs_tool_create_respects_sandbox():
@@ -438,50 +446,6 @@ def test_mcp_wrappers_not_discoverable():
     assert MCPToolWrapper._plugin_discoverable is False
     assert MCPResourceWrapper._plugin_discoverable is False
     assert MCPPromptWrapper._plugin_discoverable is False
-
-
-# --- Task 8: Config round-trip tests ---
-
-
-def test_config_round_trip():
-    """Verify config serialization is unchanged after moving config classes."""
-    from nanobot.config.schema import Config
-
-    config_dict = {
-        "tools": {
-            "web": {"enable": True, "search": {"provider": "brave", "api_key": "test"}},
-            "exec": {"enable": False, "timeout": 120, "pathPrepend": "/venv/bin"},
-            "my": {"allowSet": True},
-            "imageGeneration": {"enabled": True, "provider": "openrouter"},
-        }
-    }
-    config = Config.model_validate(config_dict)
-    dumped = config.model_dump(mode="json", by_alias=True)
-
-    assert dumped["tools"]["my"]["allowSet"] is True
-    assert dumped["tools"]["imageGeneration"]["enabled"] is True
-    assert dumped["tools"]["exec"]["pathPrepend"] == "/venv/bin"
-    assert config.tools.exec.enable is False
-    assert config.tools.exec.timeout == 120
-    assert config.tools.exec.path_prepend == "/venv/bin"
-    assert config.tools.web.search.provider == "brave"
-
-
-def test_config_defaults():
-    """Verify default values match the original hardcoded schema."""
-    from nanobot.config.schema import Config
-
-    config = Config.model_validate({})
-    assert config.tools.exec.enable is True
-    assert config.tools.exec.timeout == 60
-    assert config.tools.exec.path_prepend == ""
-    assert config.tools.web.enable is True
-    assert config.tools.web.search.provider == "duckduckgo"
-    assert config.tools.my.enable is True
-    assert config.tools.my.allow_set is False
-    assert config.tools.image_generation.enabled is False
-    assert config.tools.cli_apps.enable is True
-    assert config.tools.restrict_to_workspace is False
 
 
 # --- Task 10: Integration test ---

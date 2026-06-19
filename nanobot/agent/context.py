@@ -19,6 +19,7 @@ from nanobot.utils.helpers import (
     detect_image_mime,
     load_bundled_template,
     truncate_text,
+    truncate_text_to_tokens,
 )
 from nanobot.utils.prompt_templates import render_template
 
@@ -55,8 +56,8 @@ class ContextBuilder:
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
     _MAX_RECENT_HISTORY = 50
-    _MAX_HISTORY_CHARS = 32_000  # hard cap on recent history section size
     _MAX_TODO_CHARS = 4_000
+    _MAX_HISTORY_TOKENS = 8_000  # hard cap on recent history section size (tokens)
     _RUNTIME_CONTEXT_END = "[/Runtime Context]"
 
     def __init__(
@@ -126,7 +127,7 @@ class ContextBuilder:
                 history_text = "\n".join(
                     f"- [{e['timestamp']}] {e['content']}" for e in capped
                 )
-                history_text = truncate_text(history_text, self._MAX_HISTORY_CHARS)
+                history_text = truncate_text_to_tokens(history_text, self._MAX_HISTORY_TOKENS)
                 parts.append("# Recent History\n\n" + history_text)
 
         if session_summary:

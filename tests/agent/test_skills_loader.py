@@ -325,6 +325,10 @@ def test_lite_profile_filters_builtin_skills_but_keeps_workspace_override(tmp_pa
     bi_image = _write_skill(builtin, "image-generation", body="# Builtin image")
     bi_long = _write_skill(builtin, "long-goal", body="# Builtin long goal")
     bi_cron = _write_skill(builtin, "cron", body="# Builtin cron")
+    bi_github = _write_skill(builtin, "github", body="# Builtin github")
+    bi_skill_creator = _write_skill(builtin, "skill-creator", body="# Builtin skill creator")
+    bi_summarize = _write_skill(builtin, "summarize", body="# Builtin summarize")
+    bi_weather = _write_skill(builtin, "weather", body="# Builtin weather")
 
     loader = SkillsLoader(workspace, builtin_skills_dir=builtin, profile=VPS_LITE_PROFILE)
     entries = sorted(loader.list_skills(filter_unavailable=False), key=lambda item: (item["source"], item["name"]))
@@ -333,8 +337,12 @@ def test_lite_profile_filters_builtin_skills_but_keeps_workspace_override(tmp_pa
     assert {"name": "cron", "path": str(ws_cron), "source": "workspace"} in entries
     assert {"name": "cron", "path": str(bi_cron), "source": "builtin"} not in entries
     assert {"name": "my", "path": str(bi_my), "source": "builtin"} not in entries
+    assert {"name": "long-goal", "path": str(bi_long), "source": "builtin"} in entries
+    assert {"name": "github", "path": str(bi_github), "source": "builtin"} in entries
+    assert {"name": "skill-creator", "path": str(bi_skill_creator), "source": "builtin"} in entries
+    assert {"name": "summarize", "path": str(bi_summarize), "source": "builtin"} in entries
     assert {"name": "image-generation", "path": str(bi_image), "source": "builtin"} not in entries
-    assert {"name": "long-goal", "path": str(bi_long), "source": "builtin"} not in entries
+    assert {"name": "weather", "path": str(bi_weather), "source": "builtin"} not in entries
 
 
 def test_builtin_allowlist_applies_only_to_builtins(tmp_path: Path) -> None:

@@ -53,9 +53,7 @@ class RuntimeProfile:
 
         blocked: list[str] = []
         checks = (
-            ("my", "enable"),
             ("image_generation", "enabled"),
-            ("cli_apps", "enable"),
         )
         for section_name, flag_name in checks:
             section = getattr(tools_config, section_name, None)
@@ -81,13 +79,28 @@ FULL_PROFILE = RuntimeProfile(
 
 VPS_LITE_PROFILE = RuntimeProfile(
     name="vps-lite",
-    channels=frozenset({"feishu", "telegram", "discord"}),
+    channels=frozenset({"feishu", "discord"}),
     providers=frozenset({"vertex_ai", "gemini", "openai", "custom"}),
     tools=frozenset({
-        "filesystem", "apply_patch", "shell", "web", "cron", "message",
-        "external_resources", "long_task",
+        "filesystem",
+        "apply_patch",
+        "shell",
+        "web",
+        "cron",
+        "message",
+        "long_task",
+        "mcp",
+        "self",
     }),
-    skills=frozenset({"memory", "cron"}),
+    skills=frozenset({
+        "memory",
+        "cron",
+        "github",
+        "skill-creator",
+        "summarize",
+        "long-goal",
+        "my",
+    }),
     allow_entrypoint_plugins=False,
     allow_stdio_mcp=False,
 )
