@@ -56,14 +56,17 @@ refresh_runtime() {
 }
 
 run_core_tests() {
-  run_as_nanobot "${VENV_PYTHON}" -m pytest -q \
-    "${SOURCE_DIR}/tests/agent/test_dream.py" \
-    "${SOURCE_DIR}/tests/agent/tools/test_long_task.py" \
-    "${SOURCE_DIR}/tests/agent/tools/test_self_tool.py" \
-    "${SOURCE_DIR}/tests/agent/test_mcp_connection.py" \
-    "${SOURCE_DIR}/tests/channels/test_feishu_domain.py" \
-    "${SOURCE_DIR}/tests/channels/test_feishu_lazy_import.py" \
-    "${SOURCE_DIR}/tests/tools/test_tool_loader.py"
+  (
+    cd "${SOURCE_DIR}"
+    run_as_nanobot "${VENV_PYTHON}" -m pytest -q \
+      tests/agent/test_dream.py \
+      tests/agent/tools/test_long_task.py \
+      tests/agent/tools/test_self_tool.py \
+      tests/agent/test_mcp_connection.py \
+      tests/channels/test_feishu_domain.py \
+      tests/channels/test_feishu_lazy_import.py \
+      tests/tools/test_tool_loader.py
+  )
 }
 
 install_managed_files() {
