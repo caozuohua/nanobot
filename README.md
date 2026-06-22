@@ -312,7 +312,7 @@ The example below uses [OpenRouter](https://openrouter.ai/keys) only so the JSON
       "provider": "openrouter",
       "model": "anthropic/claude-opus-4.5",
       "maxTokens": 8192,
-      "contextWindowTokens": 65536,
+      "contextWindowTokens": 200000,
       "temperature": 0.1
     }
   },
