@@ -207,7 +207,7 @@ class AgentLoop:
         timezone: str | None = None,
         session_ttl_minutes: int = 0,
         consolidation_ratio: float = 0.5,
-        max_messages: int = 120,
+        max_messages: int = 500,
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
@@ -311,7 +311,7 @@ class AgentLoop:
             llm_turn_gate=self._llm_turn_gate,
         )
         self._unified_session = unified_session
-        self._max_messages = max_messages if max_messages > 0 else 120
+        self._max_messages = max_messages if max_messages > 0 else 500
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stacks: dict[str, AsyncExitStack] = {}
