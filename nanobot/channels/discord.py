@@ -93,6 +93,10 @@ if DISCORD_AVAILABLE:
                 self._channel.logger.warning("app command sync failed: {}", e)
 
         async def on_message(self, message: discord.Message) -> None:
+            self._channel.logger.info(
+                "on_message FIRED: author={} bot={} len={}",
+                message.author.id, self._channel._bot_user_id, len(message.content or ""),
+            )
             await self._channel._handle_discord_message(message)
 
         async def on_thread_delete(self, thread: discord.Thread) -> None:
@@ -539,47 +543,73 @@ class DiscordChannel(BaseChannel):
         still ignores its own outbound messages. (#3217)
         """
         if self._bot_user_id is not None and str(message.author.id) == self._bot_user_id:
+            self.logger.info("dropped: self-message (bot_user={})", self._bot_user_id)
             return
         if self._is_system_message(message):
+            self.logger.info("dropped: system-message")
             return
 
         sender_id = str(message.author.id)
         channel_id = self._channel_key(message.channel)
         self._remember_channel(message.channel)
         content = message.content or ""
+        self.logger.debug(
+            "_handle_discord_message PROCEED: author={} channel={} content_len={}",
+            sender_id, channel_id, len(content),
+        )
 
         if not self._should_accept_inbound(message, sender_id, content):
             return
 
-        media_paths, attachment_markers = await self._download_attachments(message.attachments)
-        full_content = self._compose_inbound_content(content, attachment_markers)
-        metadata = self._build_inbound_metadata(message)
-        parent_channel_id = self._channel_parent_key(message.channel)
-        session_key = None
-        if parent_channel_id is not None:
-            metadata["parent_channel_id"] = parent_channel_id
-            metadata["context_chat_id"] = parent_channel_id
-            metadata["thread_id"] = channel_id
-            session_key = f"{self.name}:{parent_channel_id}:thread:{channel_id}"
-
-        await self._start_typing(message.channel)
-
-        # Add read receipt reaction immediately, working emoji after delay
+        # ===== Broad try/except wrapping the entire ACCEPT -> _handle_message path =====
+        # Catches ANY exception (e.g. dict-attr AttributeError, async I/O errors) that
+        # would otherwise be swallowed silently by discord.py event handlers. Logs full
+        # traceback at ERROR level; does NOT re-raise so the bot stays alive and the
+        # exception is preserved in journalctl for diagnosis.
         try:
-            await message.add_reaction(self.config.read_receipt_emoji)
-            self._pending_reactions[channel_id] = message
-        except Exception as e:
-            self.logger.debug("Failed to add read receipt reaction: {}", e)
+            media_paths, attachment_markers = await self._download_attachments(message.attachments)
+            self.logger.debug("attachments_downloaded: paths={} markers={}",
+                              len(media_paths), len(attachment_markers))
+            full_content = self._compose_inbound_content(content, attachment_markers)
+            self.logger.debug("full_content_len={}", len(full_content))
+            metadata = self._build_inbound_metadata(message)
+            parent_channel_id = self._channel_parent_key(message.channel)
+            session_key = None
+            if parent_channel_id is not None:
+                metadata["parent_channel_id"] = parent_channel_id
+                metadata["context_chat_id"] = parent_channel_id
+                metadata["thread_id"] = channel_id
+                session_key = f"{self.name}:{parent_channel_id}:thread:{channel_id}"
+            self.logger.debug("metadata_built: parent={} session_key={}", parent_channel_id, session_key)
 
-        # Delayed working indicator (cosmetic — not tied to subagent lifecycle)
-        async def _delayed_working_emoji() -> None:
-            await asyncio.sleep(self.config.working_emoji_delay)
-            with suppress(Exception):
-                await message.add_reaction(self.config.working_emoji)
+            # Pre-handle debug trace + dict-safe emoji access
+            cfg = self.config
+            read_emoji = cfg.get("read_receipt_emoji") if isinstance(cfg, dict) else getattr(cfg, "read_receipt_emoji", "OK")
+            work_emoji = cfg.get("working_emoji") if isinstance(cfg, dict) else getattr(cfg, "working_emoji", "WRK")
+            work_delay = cfg.get("working_emoji_delay") if isinstance(cfg, dict) else getattr(cfg, "working_emoji_delay", 0)
+            self.logger.info("HANDLE_START: read_emoji={} work_emoji={}", read_emoji, work_emoji)
+            try:
+                await self._start_typing(message.channel)
+                self.logger.info("TYPING_OK")
+            except Exception as e:
+                self.logger.opt(exception=True).warning("typing failed: {}: {}", type(e).__name__, e)
 
-        self._working_emoji_tasks[channel_id] = asyncio.create_task(_delayed_working_emoji())
+            # Add read receipt reaction immediately, working emoji after delay
+            try:
+                await message.add_reaction(read_emoji)
+                self._pending_reactions[channel_id] = message
+            except Exception as e:
+                self.logger.opt(exception=True).warning("add_reaction(read_emoji) failed: {}: {}", type(e).__name__, e)
 
-        try:
+            # Delayed working indicator (cosmetic — not tied to subagent lifecycle)
+            async def _delayed_working_emoji() -> None:
+                await asyncio.sleep(work_delay)
+                with suppress(Exception):
+                    await message.add_reaction(work_emoji)
+
+            self._working_emoji_tasks[channel_id] = asyncio.create_task(_delayed_working_emoji())
+
+            self.logger.info("CALLING _handle_message (base)")
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=channel_id,
@@ -589,11 +619,18 @@ class DiscordChannel(BaseChannel):
                 session_key=session_key,
                 is_dm=message.guild is None,
             )
-        except Exception:
-            await self._clear_reactions(channel_id)
-            await self._stop_typing(channel_id)
-            raise
-
+            self.logger.info("_handle_message RETURNED OK")
+        except Exception as e:
+            # Catch-all: ANY exception in ACCEPT -> _handle_message path is logged
+            # with full traceback and NOT re-raised. Bot stays alive; user sees
+            # the exception in journalctl for diagnosis.
+            self.logger.opt(exception=True).error(
+                "POST_ACCEPT_EXCEPTION: {}: {}", type(e).__name__, e)
+            try:
+                await self._clear_reactions(channel_id)
+                await self._stop_typing(channel_id)
+            except Exception:
+                pass
     async def _on_message(self, message: discord.Message) -> None:
         """Backward-compatible alias for legacy tests/callers."""
         await self._handle_discord_message(message)
@@ -650,15 +687,22 @@ class DiscordChannel(BaseChannel):
     ) -> bool:
         """Check if inbound Discord message should be processed."""
         if not self.is_allowed(sender_id):
+            self.logger.info("dropped: not allowed (sender={})", sender_id)
             return False
-        # Channel-based filtering: only respond in allowed channels
-        allow_channels = self.config.allow_channels
+        # Channel-based filtering: dict-safe lookup (pydantic model OR raw dict)
+        if isinstance(self.config, dict):
+            allow_channels = self.config.get("allow_channels") or self.config.get("allowChannels") or []
+        else:
+            allow_channels = getattr(self.config, "allow_channels", None) or []
         if allow_channels:
             channel_ids = self._channel_allow_keys(message.channel)
             if channel_ids.isdisjoint(allow_channels):
+                self.logger.info("dropped: channel not in allow_channels (channel={})", channel_ids)
                 return False
         if message.guild is not None and not self._should_respond_in_group(message, content):
+            self.logger.info("dropped: group_policy rejected (guild={})", message.guild.id)
             return False
+        self.logger.info("ACCEPT: sender={} channel={}", sender_id, self._channel_key(message.channel))
         return True
 
     async def _download_attachments(
