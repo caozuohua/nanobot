@@ -26,6 +26,13 @@ from loguru import logger  # noqa: E402
 
 # Remove default handler and re-add with unified nanobot format
 logger.remove()
+# Respect LOGURU_LEVEL env if set (default "INFO" preserves upstream behavior)
+import os as _os
+_log_level = (
+    _os.environ.get("LOGURU_LEVEL")
+    or _os.environ.get("NANOBOT_LOG_LEVEL")
+    or "INFO"
+)
 _log_handler_id = logger.add(
     sys.stderr,
     format=(
@@ -34,7 +41,7 @@ _log_handler_id = logger.add(
         "<cyan>{extra[channel]}</cyan> | "
         "<level>{message}</level>"
     ),
-    level="INFO",
+    level=_log_level,
     colorize=None,
     filter=lambda record: record["extra"].setdefault("channel", "-") or True,
 )

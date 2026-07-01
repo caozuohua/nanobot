@@ -364,11 +364,18 @@ class VertexAIProvider(LLMProvider):
         try:
             requested_model = model or self.default_model
             client = await self._client_for_model(requested_model)
-            response = await client.aio.models.generate_content(
-                model=self._request_model_name(requested_model),
-                contents=contents,
-                config=config,
-            )
+            # Mirror luck-agent/core/model_router.py: call sync genai
+            # via run_in_executor (proven stable on GCP VPS).
+            loop = asyncio.get_running_loop()
+
+            def _sync_call() -> Any:
+                return client.models.generate_content(
+                    model=self._request_model_name(requested_model),
+                    contents=contents,
+                    config=config,
+                )
+
+            response = await loop.run_in_executor(None, _sync_call)
             return self._parse_response(response)
         except Exception as exc:
             return LLMResponse(
